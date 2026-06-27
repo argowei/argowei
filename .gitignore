@@ -6,24 +6,37 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
+env/
 
 # Node / Angular
 node_modules/
 dist/
 .angular/
 coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Editors and operating systems
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
 # Runtime data
 data/
 *.log
+
+# Local Docker/runtime overrides
+docker-compose.override.yml

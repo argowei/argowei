@@ -1,0 +1,67 @@
+name: Backend
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: FastAPI smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip when backend is not present
+        if: ${{ hashFiles('backend/requirements.txt') == '' }}
+        run: echo "backend/requirements.txt not found; nothing to test."
+
+      - name: Setup Python
+        if: ${{ hashFiles('backend/requirements.txt') != '' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        if: ${{ hashFiles('backend/requirements.txt') != '' }}
+        working-directory: backend
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile source
+        if: ${{ hashFiles('backend/requirements.txt') != '' }}
+        working-directory: backend
+        run: python -m compileall app
+
+      - name: Check API endpoints
+        if: ${{ hashFiles('backend/requirements.txt') != '' }}
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import asyncio
+
+          from app.main import app, health, root
+
+          paths = {route.path for route in app.routes}
+          assert "/api" in paths
+          assert "/api/health" in paths
+
+          assert asyncio.run(health()) == {"status": "ok"}
+
+          payload = asyncio.run(root())
+          assert payload["name"] == "Argowei API"
+          assert payload["version"] == app.version
+          PY
