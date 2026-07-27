@@ -30,7 +30,6 @@ services:
   backend:
     build:
       context: ./backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       # Same Postgres credentials as the db service (single source of truth
       # via the POSTGRES_* vars); host/port point at the compose services.
@@ -43,8 +42,6 @@ services:
       REDIS_PORT: 6379
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend/app:/app/app
     depends_on:
       db:
         condition: service_healthy
