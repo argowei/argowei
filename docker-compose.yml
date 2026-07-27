@@ -1,12 +1,55 @@
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-argowei}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argowei}
+      POSTGRES_DB: ${POSTGRES_DB:-argowei}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-argowei}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      # Same Postgres credentials as the db service (single source of truth
+      # via the POSTGRES_* vars); host/port point at the compose services.
+      POSTGRES_USER: ${POSTGRES_USER:-argowei}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argowei}
+      POSTGRES_DB: ${POSTGRES_DB:-argowei}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
@@ -20,3 +63,7 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+
+volumes:
+  postgres-data:
+  redis-data:
