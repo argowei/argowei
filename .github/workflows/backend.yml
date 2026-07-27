@@ -59,7 +59,10 @@ jobs:
           assert "/api" in paths
           assert "/api/health" in paths
 
-          assert asyncio.run(health()) == {"status": "ok"}
+          health_payload = asyncio.run(health())
+          assert health_payload["status"] == "ok"
+          assert "database" in health_payload
+          assert "redis" in health_payload
 
           payload = asyncio.run(root())
           assert payload["name"] == "Argowei API"
