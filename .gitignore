@@ -3,18 +3,8 @@
 .env.*
 !.env.example
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-.venv/
-venv/
-env/
+# Rust
+/backend/target/
 
 # Node / Angular
 node_modules/
