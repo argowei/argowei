@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 
-use argowei_backend::config::Settings;
-use argowei_backend::routes;
-use argowei_backend::state::AppState;
+use argowei_api::config::Settings;
+use argowei_api::routes;
+use argowei_api::state::AppState;
 use tokio::net::TcpListener;
 
 #[tokio::main]

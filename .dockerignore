@@ -1,0 +1,17 @@
+.git/
+.github/
+.env
+.env.*
+!.env.example
+
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+target/
+crates/*/target/
+crates/argowei-api/app/
+
+data/
+*.log
+docker-compose.override.yml

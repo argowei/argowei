@@ -1,6 +1,6 @@
-use argowei_backend::config::Settings;
-use argowei_backend::routes;
-use argowei_backend::state::AppState;
+use argowei_api::config::Settings;
+use argowei_api::routes;
+use argowei_api::state::AppState;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -22,12 +22,7 @@ async fn root_returns_name_and_version() {
     let app = routes::router(test_state());
 
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/api")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri("/api").body(Body::empty()).unwrap())
         .await
         .unwrap();
 

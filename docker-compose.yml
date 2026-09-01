@@ -29,7 +29,8 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: crates/argowei-api/Dockerfile
     environment:
       # Same Postgres credentials as the db service (single source of truth
       # via the POSTGRES_* vars); host/port point at the compose services.

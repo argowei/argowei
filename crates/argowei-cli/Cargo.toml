@@ -1,0 +1,13 @@
+[package]
+name = "argowei-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "argowei"
+path = "src/main.rs"
+
+[dependencies]
+argowei-core.workspace = true
+clap.workspace = true

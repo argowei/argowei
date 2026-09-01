@@ -3,9 +3,9 @@ FROM rust:1.90-slim AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-COPY src ./src
+COPY crates ./crates
 
-RUN cargo build --release --locked
+RUN cargo build --release --locked -p argowei-api
 
 FROM debian:trixie-slim
 
@@ -17,11 +17,11 @@ WORKDIR /app
 
 RUN groupadd --system argowei && useradd --system --gid argowei argowei
 
-COPY --from=builder /app/target/release/argowei-backend ./argowei-backend
+COPY --from=builder /app/target/release/argowei-api ./argowei-api
 COPY migrations ./migrations
 
 USER argowei
 
 EXPOSE 8000
 
-CMD ["./argowei-backend"]
+CMD ["./argowei-api"]
