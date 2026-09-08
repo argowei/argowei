@@ -3,13 +3,15 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
+use crate::devices;
 use crate::state::AppState;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api", get(root))
         .route("/api/health", get(health))
-        .with_state(state)
+        .with_state(state.clone())
+        .merge(devices::router(state))
 }
 
 async fn root() -> Json<Value> {
