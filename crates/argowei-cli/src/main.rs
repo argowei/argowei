@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand};
+use std::error::Error;
+
+mod interfaces;
 
 #[derive(Debug, Parser)]
 #[command(name = "argowei")]
@@ -12,9 +15,11 @@ struct Cli {
 enum Command {
     /// Print build and project information.
     About,
+    /// List local network interfaces.
+    Interfaces,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -25,5 +30,10 @@ fn main() {
                 env!("CARGO_PKG_VERSION")
             );
         }
+        Command::Interfaces => {
+            interfaces::run()?;
+        }
     }
+
+    Ok(())
 }

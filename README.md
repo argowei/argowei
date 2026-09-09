@@ -38,6 +38,7 @@ Run the CLI:
 
 ```bash
 cargo run -p argowei-cli -- about
+cargo run -p argowei-cli -- interfaces
 ```
 
 ## Repository Layout
