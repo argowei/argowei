@@ -1,17 +1,18 @@
-use argowei_core::device::Device;
+use argowei_core::device::{AddressSource, Device, DeviceAddress, IpProtocol};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
+use serde::Serialize;
 use sqlx::postgres::PgRow;
 use sqlx::{FromRow, PgPool, Row};
 
 use crate::state::AppState;
 
 // argowei-core intentionally has no sqlx dependency (it stays usable from
-// the CLI crate without pulling in a database driver), so the FromRow
-// mapping for the shared Device type lives here instead of a derive on the
-// struct itself.
+// the CLI crate without pulling in a database driver), so FromRow mapping
+// for the shared types lives here instead of a derive on the structs
+// themselves.
 struct DeviceRow(Device);
 
 impl FromRow<'_, PgRow> for DeviceRow {
@@ -19,7 +20,6 @@ impl FromRow<'_, PgRow> for DeviceRow {
         Ok(DeviceRow(Device {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            ip_address: row.try_get("ip_address")?,
             mac_address: row.try_get("mac_address")?,
             is_online: row.try_get("is_online")?,
             first_seen: row.try_get("first_seen")?,
@@ -28,25 +28,95 @@ impl FromRow<'_, PgRow> for DeviceRow {
     }
 }
 
+struct DeviceAddressRow(DeviceAddress);
+
+impl FromRow<'_, PgRow> for DeviceAddressRow {
+    fn from_row(row: &PgRow) -> sqlx::Result<Self> {
+        let protocol: String = row.try_get("protocol")?;
+        let source: String = row.try_get("source")?;
+
+        Ok(DeviceAddressRow(DeviceAddress {
+            id: row.try_get("id")?,
+            device_id: row.try_get("device_id")?,
+            ip_address: row.try_get("ip_address")?,
+            protocol: match protocol.as_str() {
+                "ipv4" => IpProtocol::V4,
+                "ipv6" => IpProtocol::V6,
+                other => {
+                    return Err(sqlx::Error::Decode(
+                        format!("unknown ip_protocol value: {other}").into(),
+                    ))
+                }
+            },
+            source: match source.as_str() {
+                "arp" => AddressSource::Arp,
+                "ndp" => AddressSource::Ndp,
+                other => {
+                    return Err(sqlx::Error::Decode(
+                        format!("unknown address source value: {other}").into(),
+                    ))
+                }
+            },
+            first_seen: row.try_get("first_seen")?,
+            last_seen: row.try_get("last_seen")?,
+        }))
+    }
+}
+
+#[derive(Serialize)]
+struct DeviceWithAddresses {
+    #[serde(flatten)]
+    device: Device,
+    addresses: Vec<DeviceAddress>,
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/devices", get(list_devices))
         .with_state(state)
 }
 
-async fn list_devices(State(state): State<AppState>) -> Result<Json<Vec<Device>>, StatusCode> {
-    list(&state.db)
+async fn list_devices(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DeviceWithAddresses>>, StatusCode> {
+    list_with_addresses(&state.db)
         .await
-        .map(|rows| Json(rows.into_iter().map(|r| r.0).collect()))
+        .map(Json)
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
 }
 
-/// Returns all known devices, most recently seen first.
-async fn list(db: &PgPool) -> Result<Vec<DeviceRow>, sqlx::Error> {
-    sqlx::query_as::<_, DeviceRow>(
-        "SELECT id, name, ip_address, mac_address, is_online, first_seen, last_seen \
+/// Returns all known devices with their addresses, most recently seen first.
+/// Two queries (devices, then addresses filtered to those device ids) rather
+/// than a join: with the DEVICE:ADDRESS 1:N relationship, a join would repeat
+/// every device column per address row for no benefit here.
+async fn list_with_addresses(db: &PgPool) -> Result<Vec<DeviceWithAddresses>, sqlx::Error> {
+    let devices = sqlx::query_as::<_, DeviceRow>(
+        "SELECT id, name, mac_address, is_online, first_seen, last_seen \
          FROM devices ORDER BY last_seen DESC",
     )
     .fetch_all(db)
-    .await
+    .await?;
+
+    let device_ids: Vec<i32> = devices.iter().map(|row| row.0.id).collect();
+
+    let addresses = sqlx::query_as::<_, DeviceAddressRow>(
+        "SELECT id, device_id, ip_address, protocol::text, source, first_seen, last_seen \
+         FROM device_addresses WHERE device_id = ANY($1)",
+    )
+    .bind(&device_ids)
+    .fetch_all(db)
+    .await?;
+
+    Ok(devices
+        .into_iter()
+        .map(|DeviceRow(device)| {
+            let addresses = addresses
+                .iter()
+                .filter(|DeviceAddressRow(addr)| addr.device_id == device.id)
+                .map(|DeviceAddressRow(addr)| addr.clone())
+                .collect();
+
+            DeviceWithAddresses { device, addresses }
+        })
+        .collect())
 }
