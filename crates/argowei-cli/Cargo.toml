@@ -9,5 +9,6 @@ name = "argowei"
 path = "src/main.rs"
 
 [dependencies]
+argowei-collector.workspace = true
 argowei-core.workspace = true
 clap.workspace = true

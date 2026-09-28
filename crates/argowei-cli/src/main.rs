@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::error::Error;
 
 mod interfaces;
+mod scan;
 
 #[derive(Debug, Parser)]
 #[command(name = "argowei")]
@@ -17,6 +18,14 @@ enum Command {
     About,
     /// List local network interfaces.
     Interfaces,
+    /// ARP-scan a network interface's local subnet for live hosts.
+    ///
+    /// Requires permission to open a raw socket (run as root, or grant
+    /// CAP_NET_RAW to the binary).
+    Scan {
+        /// Interface to scan on, e.g. eth0 (see `argowei interfaces`).
+        interface: String,
+    },
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -32,6 +41,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Command::Interfaces => {
             interfaces::run()?;
+        }
+        Command::Scan { interface } => {
+            scan::run(&interface)?;
         }
     }
 
