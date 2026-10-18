@@ -6,7 +6,9 @@ use argowei_collector::scan_arp;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn run(interface: &str) -> Result<(), Box<dyn Error>> {
-    println!("Scanning on {interface} (timeout {DEFAULT_TIMEOUT:?})...");
+    println!(
+        "Scanning on {interface} (response window {DEFAULT_TIMEOUT:?} after paced requests)..."
+    );
 
     let hosts = scan_arp(interface, DEFAULT_TIMEOUT)?;
 

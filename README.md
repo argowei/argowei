@@ -47,13 +47,37 @@ cargo run -p argowei-cli -- interfaces
 crates/
   argowei-api/    Axum API used by the web application
   argowei-cli/    command-line interface
+  argowei-collector/ bounded local-network discovery
   argowei-core/   shared domain types and pure logic
 frontend/         Angular dashboard
 migrations/       database schema migrations
 ```
 
-Low-level network and WiFi collection code will be extracted into a dedicated
-collector crate once the first packet/probe feature exists.
+### ARP discovery
+
+```bash
+cargo run -p argowei-cli -- interfaces
+cargo build -p argowei-cli
+sudo ./target/debug/argowei scan eth0
+```
+
+Requires root or `CAP_NET_RAW` on Linux. Scans the interface's first IPv4
+network, limited to /22 through /32. Requests are paced at up to 100 per
+second, followed by a three-second response window. Transport errors fail
+the scan. Results currently go to the terminal only.
+
+ARP replies are unauthenticated; a missing reply does not prove a device is
+offline.
+
+### Backend checks
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+Collector tests use fake channels and require no network access or root.
 
 ### Database migrations
 
