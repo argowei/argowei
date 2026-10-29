@@ -1,86 +1,60 @@
-import { HttpClient } from '@angular/common/http';
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
+import { Router, RouterOutlet } from '@angular/router';
 
-interface HealthResponse {
-  status: string;
-}
+import { AuthService } from './core/auth.service';
 
 @Component({
   selector: 'app-root',
-  imports: [],
+  imports: [RouterOutlet],
   template: `
+    @if (username(); as name) {
+      <header>
+        <span class="user">{{ name }}</span>
+        <button type="button" class="secondary" (click)="logout()">Sign out</button>
+      </header>
+    }
     <main>
-      <section>
-        <p class="eyebrow">Network intelligence</p>
-        <h1>Argowei</h1>
-        <p>Make your network visible, understandable, and manageable.</p>
-        <div class="status">
-          <span [class.online]="backendStatus() === 'connected'"></span>
-          Backend: {{ backendStatus() }}
-        </div>
-      </section>
+      <router-outlet />
     </main>
   `,
   styles: `
+    header {
+      position: fixed;
+      top: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      padding: 0.8rem 1.2rem;
+      color: #aebdcc;
+    }
+
     main {
       min-height: 100vh;
       display: grid;
       place-items: center;
-      padding: 2rem;
-    }
-
-    section {
-      width: min(34rem, 100%);
-      padding: 2.5rem;
-      border: 1px solid #263849;
-      border-radius: 1rem;
-      background: #111d28;
-      box-shadow: 0 1.5rem 5rem #0006;
-    }
-
-    .eyebrow {
-      color: #65d6ad;
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-
-    h1 {
-      margin: 0.5rem 0;
-      font-size: clamp(2.5rem, 10vw, 4.5rem);
-    }
-
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      margin-top: 2rem;
-      color: #aebdcc;
-    }
-
-    .status span {
-      width: 0.65rem;
-      height: 0.65rem;
-      border-radius: 50%;
-      background: #ef6a6a;
-    }
-
-    .status span.online {
-      background: #65d6ad;
-      box-shadow: 0 0 0.8rem #65d6ad88;
+      padding: 4rem 2rem 2rem;
     }
   `,
 })
 export class App {
-  private readonly http = inject(HttpClient);
-  protected readonly backendStatus = signal('checking…');
+  private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
 
-  constructor() {
-    this.http.get<HealthResponse>('/api/health').subscribe({
-      next: ({ status }) =>
-        this.backendStatus.set(status === 'ok' ? 'connected' : 'unknown'),
-      error: () => this.backendStatus.set('unavailable'),
+  protected readonly username = computed(() => {
+    const session = this.auth.session();
+    return session?.kind === 'authenticated' ? session.username : null;
+  });
+
+  protected logout(): void {
+    const leave = () => void this.router.navigate(['/login']);
+    // The session is gone either way; a failed request must not trap the user.
+    this.auth.logout().subscribe({
+      next: leave,
+      error: () => {
+        this.auth.markExpired();
+        leave();
+      },
     });
   }
 }

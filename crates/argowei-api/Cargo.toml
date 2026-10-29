@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 argon2.workspace = true
+argowei-collector.workspace = true
 argowei-core.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
