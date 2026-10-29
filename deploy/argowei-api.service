@@ -1,0 +1,40 @@
+# systemd unit for running the Argowei API directly on the host.
+# See docs/DEPLOYMENT.md for the full setup.
+[Unit]
+Description=Argowei API
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=argowei
+Group=argowei
+EnvironmentFile=/etc/argowei/argowei.env
+WorkingDirectory=/var/lib/argowei
+ExecStart=/usr/local/bin/argowei-api
+Restart=on-failure
+RestartSec=5
+
+# Raw sockets for ARP discovery without running as root. NET_ADMIN is only
+# needed once firewall enforcement (gateway mode) is used: add it to both
+# lines below at that point.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+# Sandboxing
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/argowei
+StateDirectory=argowei
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK AF_PACKET
+
+[Install]
+WantedBy=multi-user.target

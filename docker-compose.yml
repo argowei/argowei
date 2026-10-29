@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argowei}
       POSTGRES_DB: ${POSTGRES_DB:-argowei}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only: the backend runs on the host network (see below) and
+      # reaches the database via 127.0.0.1; nothing else on the LAN needs it.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +20,7 @@ services:
   redis:
     image: redis:8-alpine
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -31,18 +33,30 @@ services:
     build:
       context: .
       dockerfile: crates/argowei-api/Dockerfile
+    # Host networking is required for LAN discovery: on Docker's default
+    # bridge network the container only sees its own virtual subnet, so ARP
+    # scans, DNS serving and similar features would never reach the real LAN.
+    # The API therefore listens on port 8000 of the host itself.
+    network_mode: host
+    # Least privilege: raw sockets for ARP/packet capture only. Add NET_ADMIN
+    # later, when firewall enforcement (gateway mode) is used.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
     environment:
-      # Same Postgres credentials as the db service (single source of truth
-      # via the POSTGRES_* vars); host/port point at the compose services.
       POSTGRES_USER: ${POSTGRES_USER:-argowei}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argowei}
       POSTGRES_DB: ${POSTGRES_DB:-argowei}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: 5432
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-    ports:
-      - "8000:8000"
+      # Host network: published loopback ports of the db/redis services.
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      ARGOWEI_COOKIE_SECURE: ${ARGOWEI_COOKIE_SECURE:-false}
+      ARGOWEI_SESSION_TTL_HOURS: ${ARGOWEI_SESSION_TTL_HOURS:-24}
     depends_on:
       db:
         condition: service_healthy
@@ -53,7 +67,10 @@ services:
     build:
       context: ./frontend
     environment:
-      API_PROXY_TARGET: http://backend:8000
+      # The backend is on the host network, not on the compose network.
+      API_PROXY_TARGET: http://host.docker.internal:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "4200:4200"
     volumes:

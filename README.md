@@ -14,6 +14,10 @@ docker compose up --build
 The dashboard is available at <http://localhost:4200> and the API at
 <http://localhost:8000/api>.
 
+The backend runs on the host network so it can see your real LAN; see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the three supported setups
+(development, systemd service, Docker Compose) and why.
+
 Copy `.env.example` to `.env` first to set the Postgres/Redis credentials used
 by Compose (sensible defaults are provided).
 
