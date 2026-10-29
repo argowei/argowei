@@ -69,6 +69,28 @@ the scan. Results currently go to the terminal only.
 ARP replies are unauthenticated; a missing reply does not prove a device is
 offline.
 
+### Scheduled discovery
+
+The API can scan interfaces on an interval and store the results in
+`devices` / `device_addresses`. It is off until interfaces are configured:
+
+```bash
+ARGOWEI_DISCOVERY_INTERFACES=eth0,wlan0   # comma-separated; empty = disabled
+ARGOWEI_DISCOVERY_INTERVAL_SECS=300       # 30-86400
+ARGOWEI_DISCOVERY_TIMEOUT_SECS=3          # response window, 1-60
+```
+
+The API process needs raw-socket rights (`CAP_NET_RAW`, e.g.
+`sudo setcap cap_net_raw+ep target/debug/argowei-api` for local development;
+in Docker the backend needs host networking plus `cap_add: [NET_RAW]`). Without
+them each scan logs an error naming the missing capability and is retried at
+the next interval; the API keeps running.
+
+Re-scans only move `last_seen` forward. A device that changes IP keeps its
+old address row, and when an IP moves to a different device both rows are
+kept; the newest `last_seen` is the current holder. Devices that do not answer
+are left unchanged (online/offline tracking is a separate feature).
+
 ### Authentication
 
 All `/api` routes except `/api`, `/api/health`, `/api/auth/status`,

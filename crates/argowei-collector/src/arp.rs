@@ -28,6 +28,10 @@ pub enum ArpScanError {
     InvalidTimeout,
     ReceiverPanicked,
     NoChannel(String),
+    /// Opening the raw socket was refused: the process lacks root or
+    /// CAP_NET_RAW. Kept separate from `NoChannel` so callers can show an
+    /// actionable message instead of a bare OS error.
+    MissingPrivileges(String),
     Io(std::io::Error),
 }
 
@@ -43,6 +47,7 @@ impl std::fmt::Display for ArpScanError {
             Self::InvalidTimeout => write!(f, "response timeout must be between 1 ms and 60 s"),
             Self::ReceiverPanicked => write!(f, "ARP receiver thread panicked"),
             Self::NoChannel(reason) => write!(f, "could not open a datalink channel: {reason}"),
+            Self::MissingPrivileges(interface) => write!(f, "not permitted to open a raw socket on {interface}: run as root or grant CAP_NET_RAW (see docs/DEPLOYMENT.md)"),
             Self::Io(err) => write!(f, "I/O error: {err}"),
         }
     }
@@ -208,7 +213,15 @@ fn open_channel(interface: &NetworkInterface) -> Result<SendRecvChannel, ArpScan
         Ok(_) => Err(ArpScanError::NoChannel(
             "unsupported channel type for this interface".to_string(),
         )),
-        Err(err) => Err(ArpScanError::NoChannel(err.to_string())),
+        Err(err) => Err(classify_channel_error(&interface.name, err)),
+    }
+}
+
+fn classify_channel_error(interface_name: &str, err: std::io::Error) -> ArpScanError {
+    if err.kind() == std::io::ErrorKind::PermissionDenied {
+        ArpScanError::MissingPrivileges(interface_name.to_string())
+    } else {
+        ArpScanError::NoChannel(err.to_string())
     }
 }
 
@@ -340,6 +353,22 @@ mod tests {
         assert!(!hosts.contains(&source));
         assert!(hosts.contains(&Ipv4Addr::new(192, 168, 1, 1)));
         assert!(hosts.contains(&Ipv4Addr::new(192, 168, 1, 254)));
+    }
+
+    #[test]
+    fn permission_errors_are_reported_as_missing_privileges() {
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let message = classify_channel_error("eth0", denied).to_string();
+        assert!(
+            message.contains("CAP_NET_RAW") && message.contains("eth0"),
+            "{message}"
+        );
+
+        let other = std::io::Error::other("boom");
+        assert!(matches!(
+            classify_channel_error("eth0", other),
+            ArpScanError::NoChannel(reason) if reason.contains("boom")
+        ));
     }
 
     #[test]

@@ -18,6 +18,9 @@ fn test_state() -> AppState {
         redis_db: 0,
         cookie_secure: false,
         session_ttl_hours: 24,
+        discovery_interfaces: Vec::new(),
+        discovery_interval_secs: 300,
+        discovery_timeout_secs: 3,
     })
 }
 
