@@ -21,7 +21,7 @@ The current file was generated from the `hwdata` package's copy of `oui.txt`
 
 ```bash
 bash scripts/update-oui.sh                  # download from IEEE
-scripts/update-oui.sh path/to/oui.txt  # or use a file you downloaded
+bash scripts/update-oui.sh path/to/oui.txt  # or use a file you downloaded
 ```
 
 IEEE's firewall sometimes rejects non-browser clients. If the download fails,
