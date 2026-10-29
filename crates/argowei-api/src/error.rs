@@ -70,3 +70,20 @@ pub fn db_error(error: sqlx::Error) -> ApiError {
     tracing::error!(%error, "database error");
     ApiError::Unavailable
 }
+
+/// A unique index rejected the write (e.g. a duplicate name).
+pub fn is_unique_violation(error: &sqlx::Error) -> bool {
+    matches!(
+        error.as_database_error().map(|e| e.kind()),
+        Some(sqlx::error::ErrorKind::UniqueViolation)
+    )
+}
+
+/// A foreign key rejected the write (a referenced row is missing, or a
+/// referencing row still exists).
+pub fn is_foreign_key_violation(error: &sqlx::Error) -> bool {
+    matches!(
+        error.as_database_error().map(|e| e.kind()),
+        Some(sqlx::error::ErrorKind::ForeignKeyViolation)
+    )
+}

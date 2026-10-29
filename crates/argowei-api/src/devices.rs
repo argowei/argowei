@@ -1,4 +1,4 @@
-use argowei_core::device::{AddressSource, Device, DeviceAddress, IpProtocol};
+use argowei_core::device::{AddressSource, Device, DeviceAddress, IpProtocol, TrustLevel};
 use argowei_core::oui;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -12,7 +12,7 @@ use sqlx::{FromRow, PgPool, Row};
 
 use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
 use crate::auth::AuthUser;
-use crate::error::{db_error, ApiError};
+use crate::error::{db_error, is_foreign_key_violation, ApiError};
 use crate::state::AppState;
 
 const MAX_LABEL_CHARS: usize = 64;
@@ -24,20 +24,30 @@ const AUDIT_EXCERPT_CHARS: usize = 200;
 // the CLI crate without pulling in a database driver), so FromRow mapping
 // for the shared types lives here instead of a derive on the structs
 // themselves.
-struct DeviceRow(Device);
+struct DeviceRow(Device, String);
 
 impl FromRow<'_, PgRow> for DeviceRow {
     fn from_row(row: &PgRow) -> sqlx::Result<Self> {
-        Ok(DeviceRow(Device {
-            id: row.try_get("id")?,
-            name: row.try_get("name")?,
-            label: row.try_get("label")?,
-            notes: row.try_get("notes")?,
-            mac_address: row.try_get("mac_address")?,
-            is_online: row.try_get("is_online")?,
-            first_seen: row.try_get("first_seen")?,
-            last_seen: row.try_get("last_seen")?,
-        }))
+        let trust_level: String = row.try_get("trust_level")?;
+        let trust_level = TrustLevel::parse(&trust_level).ok_or_else(|| {
+            sqlx::Error::Decode(format!("unknown trust level: {trust_level}").into())
+        })?;
+
+        Ok(DeviceRow(
+            Device {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                label: row.try_get("label")?,
+                notes: row.try_get("notes")?,
+                group_id: row.try_get("group_id")?,
+                trust_level,
+                mac_address: row.try_get("mac_address")?,
+                is_online: row.try_get("is_online")?,
+                first_seen: row.try_get("first_seen")?,
+                last_seen: row.try_get("last_seen")?,
+            },
+            row.try_get("group_name")?,
+        ))
     }
 }
 
@@ -82,6 +92,8 @@ struct DeviceWithAddresses {
     device: Device,
     /// The user's label if set, otherwise the discovered name.
     display_name: String,
+    /// The group the device is in (`group_id` carries just the id).
+    group: GroupRef,
     /// Manufacturer from the IEEE OUI registry; `null` if unknown or the MAC
     /// is locally administered.
     vendor: Option<&'static str>,
@@ -91,11 +103,22 @@ struct DeviceWithAddresses {
     addresses: Vec<DeviceAddress>,
 }
 
+#[derive(Serialize)]
+struct GroupRef {
+    id: i32,
+    name: String,
+}
+
 impl DeviceWithAddresses {
-    fn new(device: Device, addresses: Vec<DeviceAddress>) -> Self {
+    fn new(device: Device, group_name: String, addresses: Vec<DeviceAddress>) -> Self {
         let mac = oui::lookup(&device.mac_address);
+        let group = GroupRef {
+            id: device.group_id,
+            name: group_name,
+        };
         Self {
             display_name: device.display_name().to_owned(),
+            group,
             device,
             vendor: mac.vendor,
             locally_administered_mac: mac.locally_administered,
@@ -129,8 +152,10 @@ async fn list_with_addresses(
     only: Option<i32>,
 ) -> Result<Vec<DeviceWithAddresses>, sqlx::Error> {
     let devices = sqlx::query_as::<_, DeviceRow>(
-        "SELECT id, name, label, notes, mac_address, is_online, first_seen, last_seen \
-         FROM devices WHERE ($1::int IS NULL OR id = $1) ORDER BY last_seen DESC",
+        "SELECT d.id, d.name, d.label, d.notes, d.group_id, g.name AS group_name, \
+                d.trust_level, d.mac_address, d.is_online, d.first_seen, d.last_seen \
+         FROM devices d JOIN device_groups g ON g.id = d.group_id \
+         WHERE ($1::int IS NULL OR d.id = $1) ORDER BY d.last_seen DESC",
     )
     .bind(only)
     .fetch_all(db)
@@ -148,14 +173,14 @@ async fn list_with_addresses(
 
     Ok(devices
         .into_iter()
-        .map(|DeviceRow(device)| {
+        .map(|DeviceRow(device, group_name)| {
             let addresses = addresses
                 .iter()
                 .filter(|DeviceAddressRow(addr)| addr.device_id == device.id)
                 .map(|DeviceAddressRow(addr)| addr.clone())
                 .collect();
 
-            DeviceWithAddresses::new(device, addresses)
+            DeviceWithAddresses::new(device, group_name, addresses)
         })
         .collect())
 }
@@ -172,11 +197,32 @@ struct UpdateDevice {
     label: Option<Option<String>>,
     /// Absent: unchanged. Blank: clear the notes.
     notes: Option<String>,
+    /// Absent: unchanged. `null` is rejected: every device is in a group,
+    /// and "Unassigned" is one (move a device back by its id).
+    #[serde(default, deserialize_with = "required")]
+    group_id: Option<i32>,
+    /// Absent: unchanged. `null` is rejected: there is no "no trust level".
+    #[serde(default, deserialize_with = "required")]
+    trust_level: Option<TrustLevel>,
+}
+
+/// For fields that may be omitted but, when present, must have a real value
+/// (a plain `Option` would quietly treat `null` as omitted).
+fn required<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(d).map(Some)
 }
 
 /// Distinguishes "field absent" (None) from "field is null" (Some(None)).
-fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
-    Option::<String>::deserialize(d).map(Some)
+fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
 }
 
 /// Trims; a blank label means "no label". Single line, no control characters.
@@ -235,16 +281,21 @@ async fn update_device(
     let new_notes = body.notes.as_deref().map(normalize_notes).transpose()?;
 
     let mut tx = state.db.begin().await.map_err(db_error)?;
-    let (old_label, old_notes): (Option<String>, String) =
-        sqlx::query_as("SELECT label, notes FROM devices WHERE id = $1 FOR UPDATE")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_error)?
-            .ok_or(ApiError::NotFound("no such device"))?;
+    let (old_label, old_notes, old_group, old_trust): (Option<String>, String, i32, String) =
+        sqlx::query_as(
+            "SELECT label, notes, group_id, trust_level FROM devices WHERE id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound("no such device"))?;
+    let old_trust = TrustLevel::parse(&old_trust).ok_or(ApiError::Unavailable)?;
 
     let label = new_label.unwrap_or_else(|| old_label.clone());
     let notes = new_notes.unwrap_or_else(|| old_notes.clone());
+    let group = body.group_id.unwrap_or(old_group);
+    let trust = body.trust_level.unwrap_or(old_trust);
 
     let mut changes = serde_json::Map::new();
     if label != old_label {
@@ -256,16 +307,56 @@ async fn update_device(
             json!({ "from": excerpt(&old_notes), "to": excerpt(&notes) }),
         );
     }
+    if trust != old_trust {
+        changes.insert(
+            "trust_level".into(),
+            json!({ "from": old_trust, "to": trust }),
+        );
+    }
 
-    let changed = !changes.is_empty();
+    let changed_group = group != old_group;
+    let changed = !changes.is_empty() || changed_group;
     if changed {
-        sqlx::query("UPDATE devices SET label = $2, notes = $3 WHERE id = $1")
-            .bind(id)
-            .bind(&label)
-            .bind(&notes)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
+        sqlx::query(
+            "UPDATE devices SET label = $2, notes = $3, group_id = $4, trust_level = $5 \
+             WHERE id = $1",
+        )
+        .bind(id)
+        .bind(&label)
+        .bind(&notes)
+        .bind(group)
+        .bind(trust.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            if is_foreign_key_violation(&error) {
+                ApiError::BadRequest("no such group".into())
+            } else {
+                db_error(error)
+            }
+        })?;
+
+        if changed_group {
+            // Names make the audit entry readable after a group is renamed.
+            let names: Vec<(i32, String)> =
+                sqlx::query_as("SELECT id, name FROM device_groups WHERE id = ANY($1)")
+                    .bind(vec![old_group, group])
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+            let describe = |group: i32| {
+                let name = names
+                    .iter()
+                    .find(|(id, _)| *id == group)
+                    .map(|(_, name)| name.as_str());
+                json!({ "id": group, "name": name })
+            };
+            changes.insert(
+                "group".into(),
+                json!({ "from": describe(old_group), "to": describe(group) }),
+            );
+        }
+
         audit::record(
             &mut *tx,
             AuditEntry::new(&user.username, "device.update", Outcome::Success)
@@ -305,6 +396,8 @@ mod tests {
             name: mac.to_owned(),
             label: None,
             notes: String::new(),
+            group_id: 1,
+            trust_level: TrustLevel::default(),
             mac_address: mac.to_owned(),
             is_online: true,
             first_seen: Utc::now(),
@@ -358,6 +451,7 @@ mod tests {
     fn registered_mac_exposes_its_vendor() {
         let json = serde_json::to_value(DeviceWithAddresses::new(
             device("b8:27:eb:12:34:56"),
+            "Unassigned".to_owned(),
             vec![],
         ))
         .unwrap();
@@ -371,6 +465,7 @@ mod tests {
     fn unknown_mac_has_null_vendor() {
         let json = serde_json::to_value(DeviceWithAddresses::new(
             device("0c:0d:0e:33:44:55"),
+            "Unassigned".to_owned(),
             vec![],
         ))
         .unwrap();
@@ -383,6 +478,7 @@ mod tests {
     fn randomized_mac_is_flagged_instead_of_given_a_vendor() {
         let json = serde_json::to_value(DeviceWithAddresses::new(
             device("1a:56:ce:30:fa:6c"),
+            "Unassigned".to_owned(),
             vec![],
         ))
         .unwrap();
