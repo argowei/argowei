@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerates crates/argowei-core/registry/oui.tsv from the IEEE MA-L registry.
 #
-# Usage: scripts/update-oui.sh [path/to/oui.txt]
+# Usage: bash scripts/update-oui.sh [path/to/oui.txt]
 #
 # Without an argument the registry is downloaded from IEEE. IEEE's web
 # application firewall sometimes rejects non-browser clients; in that case
