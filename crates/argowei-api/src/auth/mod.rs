@@ -12,8 +12,8 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use axum::extract::{Request, State};
-use axum::http::header::{HOST, ORIGIN, RETRY_AFTER};
-use axum::http::{HeaderValue, Method, StatusCode};
+use axum::http::header::{HOST, ORIGIN};
+use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -29,7 +29,8 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use subtle::ConstantTimeEq;
 
-use crate::audit::{self, AuditEntry, Audited, Outcome};
+use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
+use crate::error::{db_error, ApiError};
 use crate::state::AppState;
 use throttle::LoginThrottle;
 
@@ -86,67 +87,6 @@ impl AuthState {
             }
         }
     }
-}
-
-// --- errors ---------------------------------------------------------------
-
-enum ApiError {
-    Unauthorized,
-    Forbidden(&'static str),
-    BadRequest(String),
-    Conflict(&'static str),
-    TooManyRequests {
-        retry_after_secs: u64,
-    },
-    Unavailable,
-    /// Wraps a failure the handler already wrote to the audit log, so the
-    /// safety-net middleware does not add a second entry.
-    Audited(Box<ApiError>),
-}
-
-impl ApiError {
-    /// For failures already written to the audit log by the handler.
-    fn audited(self) -> ApiError {
-        ApiError::Audited(Box::new(self))
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        if let ApiError::Audited(inner) = self {
-            let mut response = inner.into_response();
-            response.extensions_mut().insert(Audited);
-            return response;
-        }
-
-        let (status, message) = match &self {
-            ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "authentication required".into()),
-            ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, (*msg).to_owned()),
-            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            ApiError::Conflict(msg) => (StatusCode::CONFLICT, (*msg).to_owned()),
-            ApiError::TooManyRequests { .. } => {
-                (StatusCode::TOO_MANY_REQUESTS, "too many attempts".into())
-            }
-            ApiError::Unavailable => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "service unavailable".into(),
-            ),
-            ApiError::Audited(_) => unreachable!("handled above"),
-        };
-
-        let mut response = (status, Json(json!({ "error": message }))).into_response();
-        if let ApiError::TooManyRequests { retry_after_secs } = self {
-            response
-                .headers_mut()
-                .insert(RETRY_AFTER, HeaderValue::from(retry_after_secs));
-        }
-        response
-    }
-}
-
-fn db_error(error: sqlx::Error) -> ApiError {
-    tracing::error!(%error, "database error in auth handler");
-    ApiError::Unavailable
 }
 
 // --- tokens ---------------------------------------------------------------
@@ -498,27 +438,6 @@ async fn hash_blocking(password: String) -> Option<String> {
         .await
         .ok()
         .and_then(Result::ok)
-}
-
-/// Client details handlers want for the audit log.
-struct RequestMeta {
-    remote_addr: Option<String>,
-}
-
-#[axum::async_trait]
-impl<S: Send + Sync> axum::extract::FromRequestParts<S> for RequestMeta {
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let remote_addr = parts
-            .extensions
-            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-            .map(|axum::extract::ConnectInfo(addr)| addr.ip().to_string());
-        Ok(Self { remote_addr })
-    }
 }
 
 #[cfg(test)]

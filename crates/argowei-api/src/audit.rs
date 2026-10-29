@@ -154,6 +154,27 @@ pub fn redact(value: &mut Value) {
     }
 }
 
+/// Client details handlers want for the audit log.
+pub struct RequestMeta {
+    pub remote_addr: Option<String>,
+}
+
+#[axum::async_trait]
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for RequestMeta {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let remote_addr = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|axum::extract::ConnectInfo(addr)| addr.ip().to_string());
+        Ok(Self { remote_addr })
+    }
+}
+
 pub fn remote_addr_of(request: &Request) -> Option<String> {
     request
         .extensions()
