@@ -3,11 +3,16 @@ import { Routes } from '@angular/router';
 import { authGuard, loginGuard, setupGuard } from './core/auth.guard';
 
 export const routes: Routes = [
+  { path: '', pathMatch: 'full', redirectTo: 'devices' },
   {
-    path: '',
-    pathMatch: 'full',
+    path: 'devices',
     canActivate: [authGuard],
-    loadComponent: () => import('./features/dashboard/dashboard').then((m) => m.Dashboard),
+    loadComponent: () => import('./features/devices/device-list').then((m) => m.DeviceList),
+  },
+  {
+    path: 'devices/:id',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/devices/device-detail').then((m) => m.DeviceDetail),
   },
   {
     path: 'login',
@@ -19,5 +24,5 @@ export const routes: Routes = [
     canActivate: [setupGuard],
     loadComponent: () => import('./features/setup/setup').then((m) => m.Setup),
   },
-  { path: '**', redirectTo: '' },
+  { path: '**', redirectTo: 'devices' },
 ];

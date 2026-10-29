@@ -45,3 +45,8 @@ jobs:
         if: ${{ hashFiles('frontend/package-lock.json') != '' }}
         working-directory: frontend
         run: npm run build
+
+      - name: Test
+        if: ${{ hashFiles('frontend/package-lock.json') != '' }}
+        working-directory: frontend
+        run: npm test -- --watch=false

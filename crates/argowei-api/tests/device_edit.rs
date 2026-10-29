@@ -231,3 +231,49 @@ async fn discovery_never_overwrites_user_input(pool: PgPool) {
     assert_eq!(list.body[0]["notes"], "wichtig");
     assert_eq!(list.body[0]["display_name"], "Mein Gerät");
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_single_device_can_be_fetched_with_its_addresses(pool: PgPool) {
+    let (h, cookie, id) = setup(pool).await;
+    sqlx::query(
+        "INSERT INTO device_addresses (device_id, ip_address, protocol, source) \
+         VALUES ($1, '192.168.1.10', 'ipv4', 'arp')",
+    )
+    .bind(id)
+    .execute(&h.pool)
+    .await
+    .unwrap();
+
+    let reply = send(
+        &h.app,
+        Method::GET,
+        &format!("/api/devices/{id}"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.body["id"], id);
+    assert_eq!(reply.body["addresses"][0]["ip_address"], "192.168.1.10");
+
+    let missing = send(
+        &h.app,
+        Method::GET,
+        &format!("/api/devices/{}", id + 1000),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+
+    let anonymous = send(
+        &h.app,
+        Method::GET,
+        &format!("/api/devices/{id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+}

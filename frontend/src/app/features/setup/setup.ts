@@ -7,6 +7,7 @@ import { AuthService, describeAuthError } from '../../core/auth.service';
 const MIN_PASSWORD_LENGTH = 12;
 
 @Component({
+  host: { class: 'centered' },
   selector: 'app-setup',
   imports: [FormsModule],
   template: `
