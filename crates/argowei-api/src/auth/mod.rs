@@ -95,21 +95,30 @@ enum ApiError {
     Forbidden(&'static str),
     BadRequest(String),
     Conflict(&'static str),
-    TooManyRequests { retry_after_secs: u64 },
+    TooManyRequests {
+        retry_after_secs: u64,
+    },
     Unavailable,
+    /// Wraps a failure the handler already wrote to the audit log, so the
+    /// safety-net middleware does not add a second entry.
+    Audited(Box<ApiError>),
 }
 
 impl ApiError {
     /// For failures already written to the audit log by the handler.
-    fn audited(self) -> Response {
-        let mut response = self.into_response();
-        response.extensions_mut().insert(Audited);
-        response
+    fn audited(self) -> ApiError {
+        ApiError::Audited(Box::new(self))
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        if let ApiError::Audited(inner) = self {
+            let mut response = inner.into_response();
+            response.extensions_mut().insert(Audited);
+            return response;
+        }
+
         let (status, message) = match &self {
             ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "authentication required".into()),
             ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, (*msg).to_owned()),
@@ -122,6 +131,7 @@ impl IntoResponse for ApiError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "service unavailable".into(),
             ),
+            ApiError::Audited(_) => unreachable!("handled above"),
         };
 
         let mut response = (status, Json(json!({ "error": message }))).into_response();
@@ -235,10 +245,8 @@ async fn admin_exists(db: &PgPool) -> sqlx::Result<bool> {
         .await
 }
 
-async fn status(State(state): State<AppState>) -> Result<Json<serde_json::Value>, Response> {
-    let exists = admin_exists(&state.db)
-        .await
-        .map_err(|e| db_error(e).into_response())?;
+async fn status(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let exists = admin_exists(&state.db).await.map_err(db_error)?;
     Ok(Json(json!({ "setup_required": !exists })))
 }
 
@@ -257,21 +265,20 @@ async fn setup(
     State(state): State<AppState>,
     request_meta: RequestMeta,
     Json(body): Json<SetupRequest>,
-) -> Result<Response, Response> {
+) -> Result<Response, ApiError> {
     let auth = &state.auth;
     let remote = request_meta.remote_addr;
 
     if let Err(wait) = auth.throttle.check(SETUP_THROTTLE_KEY, Instant::now()) {
         return Err(ApiError::TooManyRequests {
             retry_after_secs: wait.as_secs().max(1),
-        }
-        .into_response());
+        });
     }
 
     let token_ok = {
         let guard = auth.setup_token.lock().expect("setup token lock poisoned");
         match guard.as_deref() {
-            None => return Err(ApiError::Conflict("setup already completed").into_response()),
+            None => return Err(ApiError::Conflict("setup already completed")),
             Some(expected) => bool::from(expected.as_bytes().ct_eq(body.setup_token.as_bytes())),
         }
     };
@@ -293,27 +300,21 @@ async fn setup(
     if !(MIN_USERNAME_LEN..=MAX_USERNAME_LEN).contains(&username.chars().count()) {
         return Err(ApiError::BadRequest(format!(
             "username must be {MIN_USERNAME_LEN}-{MAX_USERNAME_LEN} characters"
-        ))
-        .into_response());
+        )));
     }
     if !(password::MIN_PASSWORD_LEN..=password::MAX_PASSWORD_LEN).contains(&body.password.len()) {
         return Err(ApiError::BadRequest(format!(
             "password must be {}-{} bytes",
             password::MIN_PASSWORD_LEN,
             password::MAX_PASSWORD_LEN
-        ))
-        .into_response());
+        )));
     }
 
     let password_hash = hash_blocking(body.password)
         .await
-        .ok_or_else(|| ApiError::Unavailable.into_response())?;
+        .ok_or(ApiError::Unavailable)?;
 
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|e| db_error(e).into_response())?;
+    let mut tx = state.db.begin().await.map_err(db_error)?;
     // The unique index on `(true)` makes this a no-op if an admin exists.
     let created: Option<i32> = sqlx::query_scalar(
         "INSERT INTO admin_users (username, password_hash) VALUES ($1, $2) \
@@ -323,10 +324,10 @@ async fn setup(
     .bind(&password_hash)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(|e| db_error(e).into_response())?;
+    .map_err(db_error)?;
 
     let Some(id) = created else {
-        return Err(ApiError::Conflict("setup already completed").into_response());
+        return Err(ApiError::Conflict("setup already completed"));
     };
 
     audit::record(
@@ -336,8 +337,8 @@ async fn setup(
             .remote_addr(remote),
     )
     .await
-    .map_err(|e| db_error(e).into_response())?;
-    tx.commit().await.map_err(|e| db_error(e).into_response())?;
+    .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
 
     *auth.setup_token.lock().expect("setup token lock poisoned") = None;
 
@@ -357,7 +358,7 @@ async fn login(
     jar: CookieJar,
     request_meta: RequestMeta,
     Json(body): Json<LoginRequest>,
-) -> Result<(CookieJar, Response), Response> {
+) -> Result<(CookieJar, Response), ApiError> {
     let auth = &state.auth;
     let remote = request_meta.remote_addr;
 
@@ -366,7 +367,7 @@ async fn login(
             .bind(&body.username)
             .fetch_optional(&state.db)
             .await
-            .map_err(|e| db_error(e).into_response())?;
+            .map_err(db_error)?;
 
     let key = admin
         .as_ref()
@@ -411,29 +412,25 @@ async fn login(
     let token = random_token();
     let expires_at = Utc::now() + auth.session_ttl;
 
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|e| db_error(e).into_response())?;
+    let mut tx = state.db.begin().await.map_err(db_error)?;
     sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
         .execute(&mut *tx)
         .await
-        .map_err(|e| db_error(e).into_response())?;
+        .map_err(db_error)?;
     sqlx::query("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)")
         .bind(hash_token(&token))
         .bind(user_id)
         .bind(expires_at)
         .execute(&mut *tx)
         .await
-        .map_err(|e| db_error(e).into_response())?;
+        .map_err(db_error)?;
     audit::record(
         &mut *tx,
         login_entry(&username, Outcome::Success, remote).target("admin_user", user_id),
     )
     .await
-    .map_err(|e| db_error(e).into_response())?;
-    tx.commit().await.map_err(|e| db_error(e).into_response())?;
+    .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
 
     let cookie = Cookie::build((SESSION_COOKIE, token))
         .http_only(true)
@@ -453,18 +450,14 @@ async fn logout(
     Extension(user): Extension<AuthUser>,
     jar: CookieJar,
     request_meta: RequestMeta,
-) -> Result<(CookieJar, Response), Response> {
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|e| db_error(e).into_response())?;
+) -> Result<(CookieJar, Response), ApiError> {
+    let mut tx = state.db.begin().await.map_err(db_error)?;
     if let Some(cookie) = jar.get(SESSION_COOKIE) {
         sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
             .bind(hash_token(cookie.value()))
             .execute(&mut *tx)
             .await
-            .map_err(|e| db_error(e).into_response())?;
+            .map_err(db_error)?;
     }
     audit::record(
         &mut *tx,
@@ -473,8 +466,8 @@ async fn logout(
             .remote_addr(request_meta.remote_addr),
     )
     .await
-    .map_err(|e| db_error(e).into_response())?;
-    tx.commit().await.map_err(|e| db_error(e).into_response())?;
+    .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
 
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.extensions_mut().insert(Audited);
