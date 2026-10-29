@@ -15,16 +15,23 @@ license = "MIT"
 [workspace.dependencies]
 argowei-collector = { path = "crates/argowei-collector" }
 argowei-core = { path = "crates/argowei-core" }
+argon2 = "0.5"
 axum = "0.7"
+axum-extra = { version = "0.9", features = ["cookie"] }
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 dotenvy = "0.15"
 http-body-util = "0.1"
 pnet = "0.35"
+rand = "0.8"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "migrate"] }
+sha2 = "0.10"
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "migrate", "json"] }
+subtle = "2"
+time = "0.3"
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"

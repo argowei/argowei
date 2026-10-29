@@ -69,6 +69,36 @@ the scan. Results currently go to the terminal only.
 ARP replies are unauthenticated; a missing reply does not prove a device is
 offline.
 
+### Authentication
+
+All `/api` routes except `/api`, `/api/health`, `/api/auth/status`,
+`/api/auth/setup` and `/api/auth/login` require a session cookie.
+
+On first start, with no admin account, the API logs a one-time setup token:
+
+```text
+WARN no admin account yet; first-run setup token: <token>
+```
+
+Create the admin once with it (password: 12-128 bytes):
+
+```bash
+curl -X POST http://localhost:8000/api/auth/setup \
+  -H 'Content-Type: application/json' \
+  -d '{"setup_token":"<token>","username":"admin","password":"<password>"}'
+```
+
+Sessions last `ARGOWEI_SESSION_TTL_HOURS` (default 24). Set
+`ARGOWEI_COOKIE_SECURE=true` when serving over HTTPS. Repeated failed logins
+are delayed with exponential backoff (capped at 5 minutes).
+
+### Audit log
+
+Logins, logouts, setup and every other state-changing request are recorded in
+the append-only `audit_log` table (enforced by database triggers). Read it
+with `GET /api/audit-log` (filters: `actor`, `action`, `from`, `to`; cursor
+pagination via `before` and `limit`).
+
 ### Backend checks
 
 ```bash
@@ -78,6 +108,9 @@ cargo test --workspace --locked
 ```
 
 Collector tests use fake channels and require no network access or root.
+API integration tests need Postgres and a `DATABASE_URL` (each test creates
+its own database), e.g. `DATABASE_URL=postgres://argowei:argowei@localhost:5432/argowei`
+with `docker compose up db`.
 
 ### Database migrations
 

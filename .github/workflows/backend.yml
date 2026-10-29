@@ -24,6 +24,25 @@ jobs:
     name: Rust build & test
     runs-on: ubuntu-latest
 
+    # Integration tests (#[sqlx::test]) create a throwaway database each.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: argowei
+          POSTGRES_PASSWORD: argowei
+          POSTGRES_DB: argowei
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U argowei"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://argowei:argowei@localhost:5432/argowei
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
