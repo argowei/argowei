@@ -27,6 +27,8 @@ CREATE UNIQUE INDEX ix_device_groups_name ON device_groups (lower(name));
 CREATE FUNCTION seed_system_groups() RETURNS void AS $$
 BEGIN
     INSERT INTO device_groups (slug, name, description, is_system, defaults) VALUES
+        ('unassigned', 'Unassigned', 'Devices that have not been classified yet. New devices start here.', true,
+         '{}'),
         ('trusted', 'Trusted', 'Full LAN and internet access, no restrictions.', true,
          '{"internet": "allow", "lan": "allow"}'),
         ('servers', 'Servers', 'Full access; regular hardening checks.', true,
@@ -47,11 +49,22 @@ $$ LANGUAGE plpgsql;
 
 SELECT seed_system_groups();
 
--- A device is in at most one group (a single column cannot hold two); NULL
--- means "not classified yet". Deleting a group that still has devices is
--- refused rather than silently unassigning them.
+-- Every device is in exactly one group: a single NOT NULL column. New and
+-- existing devices start in the "Unassigned" system group (the column default
+-- is its id, resolved here because a default cannot contain a subquery).
+-- Deleting a group that still has devices is refused rather than silently
+-- moving them.
+DO $$
+BEGIN
+    EXECUTE format(
+        'ALTER TABLE devices ADD COLUMN group_id INTEGER NOT NULL DEFAULT %s '
+        'REFERENCES device_groups (id) ON DELETE RESTRICT',
+        (SELECT id FROM device_groups WHERE slug = 'unassigned')
+    );
+END
+$$;
+
 ALTER TABLE devices
-    ADD COLUMN group_id INTEGER REFERENCES device_groups (id) ON DELETE RESTRICT,
     ADD COLUMN trust_level VARCHAR NOT NULL DEFAULT 'unknown'
         CONSTRAINT devices_trust_level_valid
         CHECK (trust_level IN ('trusted', 'normal', 'restricted', 'unknown', 'suspicious'));

@@ -42,6 +42,10 @@ fn group_id(groups: &[Value], name: &str) -> i64 {
         .unwrap()
 }
 
+async fn unassigned(h: &Harness, cookie: &str) -> i64 {
+    group_id(&groups(h, cookie).await, "Unassigned")
+}
+
 async fn audit_count(h: &Harness, action: &str) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1")
         .bind(action)
@@ -62,6 +66,7 @@ async fn the_system_groups_are_seeded_with_their_default_behavior(pool: PgPool) 
     assert_eq!(
         names,
         [
+            "Unassigned",
             "Trusted",
             "Servers",
             "Guest",
@@ -76,6 +81,7 @@ async fn the_system_groups_are_seeded_with_their_default_behavior(pool: PgPool) 
         .all(|g| g["is_system"] == true && g["device_count"] == 0));
 
     let by = |slug: &str| all.iter().find(|g| g["slug"] == slug).unwrap()["defaults"].clone();
+    assert_eq!(by("unassigned"), json!({}));
     assert_eq!(by("guest")["lan"], "block");
     assert_eq!(by("guest")["dns_filter"], true);
     assert_eq!(by("quarantine")["manual_release"], true);
@@ -101,7 +107,7 @@ async fn seeding_again_changes_nothing_and_keeps_edits(pool: PgPool) {
         .unwrap();
 
     let all = groups(&h, &cookie).await;
-    assert_eq!(all.len(), 7);
+    assert_eq!(all.len(), 8);
     let kids = all.iter().find(|g| g["name"] == "Kids").unwrap();
     assert_eq!(kids["description"], "Angepasst");
 }
@@ -118,6 +124,25 @@ async fn groups_require_a_session(pool: PgPool) {
         let reply = send(&h.app, method, uri, None, Some(json!({ "name": "x" }))).await;
         assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{uri}");
     }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_unassigned_group_cannot_be_renamed_or_deleted(pool: PgPool) {
+    let (h, cookie) = admin(pool).await;
+    let uri = format!("/api/groups/{}", unassigned(&h, &cookie).await);
+
+    let rename = send(
+        &h.app,
+        Method::PATCH,
+        &uri,
+        Some(&cookie),
+        Some(json!({ "name": "Other" })),
+    )
+    .await;
+    let delete = send(&h.app, Method::DELETE, &uri, Some(&cookie), None).await;
+
+    assert_eq!(rename.status, StatusCode::CONFLICT);
+    assert_eq!(delete.status, StatusCode::CONFLICT);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -149,7 +174,7 @@ async fn system_groups_cannot_be_renamed_or_deleted_but_can_be_tuned(pool: PgPoo
     .await;
     assert_eq!(tune.status, StatusCode::OK);
     assert_eq!(tune.body["defaults"], json!({ "internet": "block" }));
-    assert_eq!(groups(&h, &cookie).await.len(), 7);
+    assert_eq!(groups(&h, &cookie).await.len(), 8);
 }
 
 // --- custom groups --------------------------------------------------------
@@ -185,7 +210,7 @@ async fn custom_groups_can_be_created_renamed_and_deleted(pool: PgPool) {
     )
     .await;
     assert_eq!(deleted.status, StatusCode::NO_CONTENT);
-    assert_eq!(groups(&h, &cookie).await.len(), 7);
+    assert_eq!(groups(&h, &cookie).await.len(), 8);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -253,7 +278,7 @@ async fn invalid_group_input_is_rejected(pool: PgPool) {
             reply.status
         );
     }
-    assert_eq!(groups(&h, &cookie).await.len(), 7);
+    assert_eq!(groups(&h, &cookie).await.len(), 8);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -288,12 +313,13 @@ async fn a_group_with_devices_cannot_be_deleted(pool: PgPool) {
     .await;
     assert_eq!(refused.status, StatusCode::CONFLICT);
 
+    let back = unassigned(&h, &cookie).await;
     send(
         &h.app,
         Method::PATCH,
         &format!("/api/devices/{device}"),
         Some(&cookie),
-        Some(json!({ "group_id": null })),
+        Some(json!({ "group_id": back })),
     )
     .await;
     let deleted = send(
@@ -383,15 +409,19 @@ async fn group_changes_are_audited(pool: PgPool) {
 // --- group membership and trust level on devices ---------------------------
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn new_devices_are_unclassified_and_untrusted(pool: PgPool) {
+async fn new_devices_start_unassigned_and_untrusted(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
     new_device(&h, MAC).await;
+    let unassigned = unassigned(&h, &cookie).await;
 
     let list = send(&h.app, Method::GET, "/api/devices", Some(&cookie), None).await;
 
     assert_eq!(list.body[0]["trust_level"], "unknown");
-    assert!(list.body[0]["group"].is_null());
-    assert!(list.body[0]["group_id"].is_null());
+    assert_eq!(
+        list.body[0]["group"],
+        json!({ "id": unassigned, "name": "Unassigned" })
+    );
+    assert_eq!(list.body[0]["group_id"], unassigned);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -440,15 +470,18 @@ async fn a_device_has_one_group_and_moving_it_updates_both_counts(pool: PgPool) 
         .collect();
     assert!(counts.contains(&("Guest".into(), 1)) && counts.contains(&("IoT".into(), 0)));
 
-    let cleared = send(
+    // Moving a device back is done by id; there is no "no group".
+    let back = unassigned(&h, &cookie).await;
+    let moved_back = send(
         &h.app,
         Method::PATCH,
         &uri,
         Some(&cookie),
-        Some(json!({ "group_id": null })),
+        Some(json!({ "group_id": back })),
     )
     .await;
-    assert!(cleared.body["group"].is_null());
+    assert_eq!(moved_back.status, StatusCode::OK);
+    assert_eq!(moved_back.body["group"]["name"], "Unassigned");
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -489,7 +522,10 @@ async fn invalid_group_or_trust_values_are_rejected_and_change_nothing(pool: PgP
 
     let list = send(&h.app, Method::GET, "/api/devices", Some(&cookie), None).await;
     assert_eq!(list.body[0]["trust_level"], "normal");
-    assert!(list.body[0]["group"].is_null());
+    assert_eq!(
+        list.body[0]["group"]["name"], "Unassigned",
+        "a rejected request changes nothing"
+    );
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -512,9 +548,10 @@ async fn group_and_trust_changes_are_audited_with_names(pool: PgPool) {
             .fetch_one(&h.pool)
             .await
             .unwrap();
+    let from = unassigned(&h, &cookie).await;
     assert_eq!(
         payload["changes"]["group"],
-        json!({ "from": null, "to": { "id": iot, "name": "IoT" } })
+        json!({ "from": { "id": from, "name": "Unassigned" }, "to": { "id": iot, "name": "IoT" } })
     );
     assert_eq!(
         payload["changes"]["trust_level"],
@@ -543,10 +580,10 @@ async fn discovery_never_changes_group_or_trust(pool: PgPool) {
     .await
     .unwrap();
 
-    // Discovery created the device unclassified and untrusted ...
+    // Discovery created the device unassigned and untrusted ...
     let list = send(&h.app, Method::GET, "/api/devices", Some(&cookie), None).await;
     assert_eq!(list.body[0]["trust_level"], "unknown");
-    assert!(list.body[0]["group"].is_null());
+    assert_eq!(list.body[0]["group"]["name"], "Unassigned");
 
     // ... and later scans leave the user's classification alone.
     let id = list.body[0]["id"].as_i64().unwrap();

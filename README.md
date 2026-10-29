@@ -200,8 +200,8 @@ before/after values.
 ### Groups and trust levels
 
 Devices can be classified, nothing is enforced yet (that is the policy
-engine's job). Seven system groups are seeded: Trusted, Servers, Guest, IoT,
-Kids, Quarantine and Blocked. Each stores its default behavior as data in
+engine's job). Eight system groups are seeded: Unassigned, Trusted, Servers,
+Guest, IoT, Kids, Quarantine and Blocked. Each stores its default behavior as data in
 `defaults` (for example `{"internet": "allow", "lan": "block"}`) for the
 policy engine to consume later. System groups cannot be renamed or deleted,
 but their description and defaults can be tuned; custom groups can be
@@ -216,8 +216,9 @@ curl -X PATCH http://localhost:8000/api/devices/1 -b cookies.txt \
   -H 'Content-Type: application/json' -d '{"group_id":4,"trust_level":"restricted"}'
 ```
 
-A device is in at most one group (`group_id: null` means not classified yet)
-and has one trust level: `trusted`, `normal`, `restricted`, `unknown`
+Every device is in exactly one group; new devices start in **Unassigned** (a
+device can be moved back there by its id, `group_id: null` is rejected). It
+also has one trust level: `trusted`, `normal`, `restricted`, `unknown`
 (default for new devices) or `suspicious`. Discovery never changes either.
 Changes are audit-logged, group changes with the group names.
 

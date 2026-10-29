@@ -49,8 +49,8 @@ pub struct Device {
     pub label: Option<String>,
     /// Free-text notes written by the user.
     pub notes: String,
-    /// The group the user placed the device in; `None` until classified.
-    pub group_id: Option<i32>,
+    /// The group the device is in. New devices start in "Unassigned".
+    pub group_id: i32,
     pub trust_level: TrustLevel,
     pub mac_address: String,
     pub is_online: bool,
@@ -111,7 +111,7 @@ mod tests {
             name: name.to_owned(),
             label: label.map(str::to_owned),
             notes: String::new(),
-            group_id: None,
+            group_id: 1,
             trust_level: TrustLevel::default(),
             mac_address: "aa:bb:cc:00:00:01".to_owned(),
             is_online: true,
