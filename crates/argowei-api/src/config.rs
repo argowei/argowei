@@ -24,6 +24,10 @@ pub struct Settings {
     pub discovery_interfaces: Vec<String>,
     pub discovery_interval_secs: u64,
     pub discovery_timeout_secs: u64,
+    /// Consecutive missed scans before a device may be marked offline.
+    pub offline_after_missed_scans: u32,
+    /// Minimum time since last seen before a device may be marked offline.
+    pub offline_after_secs: u64,
 }
 
 impl Settings {
@@ -56,6 +60,9 @@ impl Settings {
             discovery_interfaces: parse_interface_list(&env_or("ARGOWEI_DISCOVERY_INTERFACES", "")),
             discovery_interval_secs: bounded("ARGOWEI_DISCOVERY_INTERVAL_SECS", 300, 30, 86_400),
             discovery_timeout_secs: bounded("ARGOWEI_DISCOVERY_TIMEOUT_SECS", 3, 1, 60),
+            offline_after_missed_scans: bounded("ARGOWEI_OFFLINE_AFTER_MISSED_SCANS", 3, 1, 1_000)
+                as u32,
+            offline_after_secs: bounded("ARGOWEI_OFFLINE_AFTER_SECS", 900, 0, 604_800),
         }
     }
 

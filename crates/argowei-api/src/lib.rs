@@ -3,5 +3,7 @@ pub mod auth;
 pub mod config;
 pub mod devices;
 pub mod discovery;
+pub mod events;
+pub mod presence;
 pub mod routes;
 pub mod state;
