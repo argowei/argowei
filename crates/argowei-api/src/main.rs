@@ -24,7 +24,7 @@ async fn main() {
     );
     let app = routes::router(state).into_make_service_with_connect_info::<SocketAddr>();
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
+    let addr = settings.bind_address;
     tracing::info!("listening on {addr}");
     let listener = TcpListener::bind(addr).await.expect("failed to bind");
     axum::serve(listener, app).await.expect("server error");

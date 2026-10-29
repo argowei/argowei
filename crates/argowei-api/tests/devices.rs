@@ -8,6 +8,7 @@ use tower::ServiceExt;
 
 fn test_state() -> AppState {
     AppState::connect(&Settings {
+        bind_address: "127.0.0.1:8000".parse().unwrap(),
         postgres_user: "argowei".to_string(),
         postgres_password: "argowei".to_string(),
         postgres_db: "argowei".to_string(),

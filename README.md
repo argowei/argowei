@@ -38,6 +38,16 @@ npm install
 npm start
 ```
 
+The dashboard lists devices at `/devices` (search, filter by status, trust and
+group, sortable columns, refreshed every 10 seconds) and shows a device's
+profile at `/devices/<id>`, where label, notes, group and trust level can be
+edited. Frontend tests run with Vitest:
+
+```bash
+cd frontend
+npm test -- --watch=false
+```
+
 Run the CLI:
 
 ```bash

@@ -3,7 +3,7 @@ use argowei_core::oui;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch};
+use axum::routing::get;
 use axum::{Extension, Json, Router};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
@@ -130,7 +130,7 @@ impl DeviceWithAddresses {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/devices", get(list_devices))
-        .route("/api/devices/:id", patch(update_device))
+        .route("/api/devices/:id", get(get_device).patch(update_device))
 }
 
 async fn list_devices(
@@ -140,6 +140,19 @@ async fn list_devices(
         .await
         .map(Json)
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
+}
+
+async fn get_device(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<Json<DeviceWithAddresses>, ApiError> {
+    list_with_addresses(&state.db, Some(id))
+        .await
+        .map_err(db_error)?
+        .into_iter()
+        .next()
+        .map(Json)
+        .ok_or(ApiError::NotFound("no such device"))
 }
 
 /// Returns known devices (all, or just `only`) with their addresses, most

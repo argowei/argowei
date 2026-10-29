@@ -5,6 +5,9 @@
 /// defaults mirror docker-compose.yml so a plain `cargo run` against a
 /// locally running Postgres/Redis works out of the box.
 pub struct Settings {
+    /// Address the API listens on.
+    pub bind_address: std::net::SocketAddr,
+
     pub postgres_user: String,
     pub postgres_password: String,
     pub postgres_db: String,
@@ -33,6 +36,9 @@ pub struct Settings {
 impl Settings {
     pub fn from_env() -> Self {
         Self {
+            bind_address: env_or("ARGOWEI_BIND_ADDRESS", "0.0.0.0:8000")
+                .parse()
+                .expect("ARGOWEI_BIND_ADDRESS must be an address like 0.0.0.0:8000"),
             postgres_user: env_or("POSTGRES_USER", "argowei"),
             postgres_password: env_or("POSTGRES_PASSWORD", "argowei"),
             postgres_db: env_or("POSTGRES_DB", "argowei"),

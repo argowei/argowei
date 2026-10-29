@@ -6,6 +6,7 @@ import { AuthService, describeAuthError } from '../../core/auth.service';
 import { safeReturnUrl } from '../../core/auth.guard';
 
 @Component({
+  host: { class: 'centered' },
   selector: 'app-login',
   imports: [FormsModule],
   template: `
