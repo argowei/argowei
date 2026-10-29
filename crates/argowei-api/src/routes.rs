@@ -1,17 +1,35 @@
 use axum::extract::State;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
-use crate::devices;
 use crate::state::AppState;
+use crate::{audit, auth, devices};
 
+/// Everything except `/api`, `/api/health` and the login/setup endpoints
+/// requires a valid session. New routes belong in `protected` unless there
+/// is a reason for them to be public.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let public = Router::new()
         .route("/api", get(root))
         .route("/api/health", get(health))
-        .with_state(state.clone())
-        .merge(devices::router(state))
+        .merge(auth::public_router());
+
+    let protected = Router::new()
+        .merge(devices::router())
+        .merge(audit::router())
+        .merge(auth::protected_router())
+        .route_layer(from_fn_with_state(state.clone(), auth::require_auth));
+
+    Router::new()
+        .merge(public)
+        .merge(protected)
+        // Layers added later wrap earlier ones: the audit layer sees the
+        // outcome of authentication, and the origin check runs first.
+        .layer(from_fn_with_state(state.clone(), audit::audit_mutations))
+        .layer(from_fn(auth::check_origin))
+        .with_state(state)
 }
 
 async fn root() -> Json<Value> {

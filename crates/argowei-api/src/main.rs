@@ -12,7 +12,8 @@ async fn main() {
 
     let settings = Settings::from_env();
     let state = AppState::connect(&settings);
-    let app = routes::router(state);
+    state.auth.init_setup_token(&state.db).await;
+    let app = routes::router(state).into_make_service_with_connect_info::<SocketAddr>();
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
     tracing::info!("listening on {addr}");

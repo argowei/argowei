@@ -1,13 +1,16 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
 
+use crate::auth::AuthState;
 use crate::config::Settings;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub redis: redis::Client,
+    pub auth: Arc<AuthState>,
 }
 
 impl AppState {
@@ -25,6 +28,19 @@ impl AppState {
         let redis =
             redis::Client::open(settings.redis_url()).expect("failed to build Redis client");
 
-        Self { db, redis }
+        let auth = AuthState::new(
+            settings.cookie_secure,
+            chrono::Duration::hours(settings.session_ttl_hours),
+        );
+
+        Self::new(db, redis, auth)
+    }
+
+    pub fn new(db: sqlx::PgPool, redis: redis::Client, auth: AuthState) -> Self {
+        Self {
+            db,
+            redis,
+            auth: Arc::new(auth),
+        }
     }
 }

@@ -70,10 +70,8 @@ struct DeviceWithAddresses {
     addresses: Vec<DeviceAddress>,
 }
 
-pub fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/api/devices", get(list_devices))
-        .with_state(state)
+pub fn router() -> Router<AppState> {
+    Router::new().route("/api/devices", get(list_devices))
 }
 
 async fn list_devices(

@@ -16,6 +16,8 @@ fn test_state() -> AppState {
         redis_host: "127.0.0.1".to_string(),
         redis_port: 6379,
         redis_db: 0,
+        cookie_secure: false,
+        session_ttl_hours: 24,
     })
 }
 
@@ -30,6 +32,9 @@ async fn list_devices_reports_service_unavailable_without_a_database() {
         .oneshot(
             Request::builder()
                 .uri("/api/devices")
+                // A session cookie makes the auth layer query the database,
+                // which is the unavailable dependency under test.
+                .header("cookie", "argowei_session=any")
                 .body(Body::empty())
                 .unwrap(),
         )

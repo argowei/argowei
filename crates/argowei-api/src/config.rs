@@ -14,6 +14,11 @@ pub struct Settings {
     pub redis_host: String,
     pub redis_port: u16,
     pub redis_db: u8,
+
+    /// Mark the session cookie `Secure`. Leave off for plain-HTTP LAN
+    /// deployments; enable when served over HTTPS (e.g. behind nginx).
+    pub cookie_secure: bool,
+    pub session_ttl_hours: i64,
 }
 
 impl Settings {
@@ -34,6 +39,14 @@ impl Settings {
             redis_db: env_or("REDIS_DB", "0")
                 .parse()
                 .expect("REDIS_DB must be a valid database index"),
+
+            cookie_secure: matches!(
+                env_or("ARGOWEI_COOKIE_SECURE", "false").as_str(),
+                "1" | "true"
+            ),
+            session_ttl_hours: env_or("ARGOWEI_SESSION_TTL_HOURS", "24")
+                .parse()
+                .expect("ARGOWEI_SESSION_TTL_HOURS must be a number of hours"),
         }
     }
 
