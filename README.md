@@ -86,6 +86,49 @@ in Docker the backend needs host networking plus `cap_add: [NET_RAW]`). Without
 them each scan logs an error naming the missing capability and is retried at
 the next interval; the API keeps running.
 
+### Presence and analysis
+
+A device is marked offline only after it missed `ARGOWEI_OFFLINE_AFTER_MISSED_SCANS`
+(default 3) consecutive scans of the interface that last saw it **and**
+`ARGOWEI_OFFLINE_AFTER_SECS` (default 900) have passed since it was last seen.
+Both are required so a scanning gap (API down) cannot mark everything offline
+after one miss. Failed scans are not scans and never count as misses.
+
+`is_online` is only the current view. The evidence is kept for analysis:
+
+| Table | Content |
+|---|---|
+| `discovery_scans` | every completed scan: interface, method, time, hosts seen |
+| `device_sightings` | which device answered in which scan, from which IP |
+| `events` | `device.discovered`, `device.online`, `device.offline` with the evidence in `payload` (missed scans, silence, policy) |
+
+A device that did not answer is the absence of a sighting for a scan that ran.
+Examples:
+
+```sql
+-- Share of scans in the last 7 days in which each device answered.
+SELECT d.mac_address,
+       round(100.0 * count(sg.scan_id) / NULLIF(max(t.total), 0), 1) AS answered_pct
+FROM devices d
+CROSS JOIN (SELECT count(*) AS total FROM discovery_scans
+            WHERE interface = 'eth0' AND scanned_at > now() - interval '7 days') t
+LEFT JOIN device_sightings sg ON sg.device_id = d.id
+     AND sg.scan_id IN (SELECT id FROM discovery_scans
+                        WHERE interface = 'eth0' AND scanned_at > now() - interval '7 days')
+WHERE d.last_seen_interface = 'eth0'
+GROUP BY d.mac_address ORDER BY answered_pct;
+
+-- Online/offline transitions per device, oldest first.
+SELECT d.mac_address, e.occurred_at, e.type, e.payload
+FROM events e JOIN devices d ON d.id = e.device_id
+WHERE e.type LIKE 'device.%' ORDER BY d.mac_address, e.occurred_at;
+```
+
+`device.discovered` is the first online period's start. Devices recorded
+before presence tracking existed are not marked offline until seen again.
+No new probes are sent for any of this: presence is derived from the scans
+already running.
+
 Re-scans only move `last_seen` forward. A device that changes IP keeps its
 old address row, and when an IP moves to a different device both rows are
 kept; the newest `last_seen` is the current holder. Devices that do not answer

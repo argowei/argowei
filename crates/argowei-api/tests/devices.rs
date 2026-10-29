@@ -21,6 +21,8 @@ fn test_state() -> AppState {
         discovery_interfaces: Vec::new(),
         discovery_interval_secs: 300,
         discovery_timeout_secs: 3,
+        offline_after_missed_scans: 3,
+        offline_after_secs: 900,
     })
 }
 
