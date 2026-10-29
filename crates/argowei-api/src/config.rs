@@ -19,6 +19,11 @@ pub struct Settings {
     /// deployments; enable when served over HTTPS (e.g. behind nginx).
     pub cookie_secure: bool,
     pub session_ttl_hours: i64,
+
+    /// Interfaces to scan periodically. Empty disables scheduled discovery.
+    pub discovery_interfaces: Vec<String>,
+    pub discovery_interval_secs: u64,
+    pub discovery_timeout_secs: u64,
 }
 
 impl Settings {
@@ -47,6 +52,10 @@ impl Settings {
             session_ttl_hours: env_or("ARGOWEI_SESSION_TTL_HOURS", "24")
                 .parse()
                 .expect("ARGOWEI_SESSION_TTL_HOURS must be a number of hours"),
+
+            discovery_interfaces: parse_interface_list(&env_or("ARGOWEI_DISCOVERY_INTERFACES", "")),
+            discovery_interval_secs: bounded("ARGOWEI_DISCOVERY_INTERVAL_SECS", 300, 30, 86_400),
+            discovery_timeout_secs: bounded("ARGOWEI_DISCOVERY_TIMEOUT_SECS", 3, 1, 60),
         }
     }
 
@@ -70,6 +79,44 @@ impl Settings {
     }
 }
 
+/// Splits a comma-separated interface list, dropping blanks and duplicates
+/// while keeping the configured order.
+fn parse_interface_list(value: &str) -> Vec<String> {
+    let mut interfaces: Vec<String> = Vec::new();
+    for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        if !interfaces.iter().any(|existing| existing == name) {
+            interfaces.push(name.to_owned());
+        }
+    }
+    interfaces
+}
+
+fn bounded(key: &str, default: u64, min: u64, max: u64) -> u64 {
+    let value: u64 = env_or(key, &default.to_string())
+        .parse()
+        .unwrap_or_else(|_| panic!("{key} must be a whole number"));
+    assert!(
+        (min..=max).contains(&value),
+        "{key} must be between {min} and {max}"
+    );
+    value
+}
+
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interface_list_is_trimmed_and_deduplicated() {
+        assert_eq!(
+            parse_interface_list(" eth0, wlan0 ,,eth0 "),
+            vec!["eth0", "wlan0"]
+        );
+        assert!(parse_interface_list("").is_empty());
+        assert!(parse_interface_list(" , ").is_empty());
+    }
 }
