@@ -94,6 +94,11 @@ A device is marked offline only after it missed `ARGOWEI_OFFLINE_AFTER_MISSED_SC
 Both are required so a scanning gap (API down) cannot mark everything offline
 after one miss. Failed scans are not scans and never count as misses.
 
+A failed scan is still visible: `GET /api/discovery/status` (authenticated)
+lists, per configured interface, the last attempt, last success and summary,
+the last error, and the number of consecutive failures. This status lives in
+memory only: nothing is written to the database and it resets on restart.
+
 `is_online` is only the current view. The evidence is kept for analysis:
 
 | Table | Content |

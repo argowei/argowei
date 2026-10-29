@@ -19,6 +19,7 @@ const PASSWORD: &str = "correct horse battery";
 
 struct Harness {
     app: Router,
+    discovery: argowei_api::discovery::DiscoveryStatus,
     setup_token: String,
     pool: PgPool,
 }
@@ -33,7 +34,10 @@ async fn harness(pool: PgPool) -> Harness {
         .await
         .expect("fresh database must issue a setup token");
 
+    let discovery = state.discovery.clone();
+
     Harness {
+        discovery,
         app: routes::router(state),
         setup_token,
         pool,
@@ -147,7 +151,12 @@ async fn audit_actions(pool: &PgPool) -> Vec<(String, String, String)> {
 async fn protected_routes_reject_anonymous_requests(pool: PgPool) {
     let h = harness(pool).await;
 
-    for uri in ["/api/devices", "/api/audit-log", "/api/auth/me"] {
+    for uri in [
+        "/api/devices",
+        "/api/audit-log",
+        "/api/auth/me",
+        "/api/discovery/status",
+    ] {
         let reply = send(&h.app, Method::GET, uri, None, None).await;
         assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{uri}");
     }
@@ -488,4 +497,45 @@ async fn audit_log_endpoint_filters_and_paginates(pool: PgPool) {
     )
     .await;
     assert_eq!(filtered.body["items"].as_array().unwrap().len(), 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn discovery_status_shows_failed_scans_without_persisting_them(pool: PgPool) {
+    use argowei_api::discovery::{DiscoveryError, ScanOutcome};
+
+    let h = harness(pool).await;
+    setup_admin(&h).await;
+    let cookie = login(&h).await;
+
+    h.discovery.register("eth0");
+    let failed: Result<ScanOutcome, DiscoveryError> = Err(DiscoveryError::Scan(
+        "not permitted; grant CAP_NET_RAW".into(),
+    ));
+    h.discovery.record("eth0", &failed, chrono::Utc::now());
+
+    let reply = send(
+        &h.app,
+        Method::GET,
+        "/api/discovery/status",
+        Some(&cookie),
+        None,
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::OK);
+    let entry = &reply.body[0];
+    assert_eq!(entry["interface"], "eth0");
+    assert_eq!(entry["consecutive_failures"], 1);
+    assert!(entry["last_error"]
+        .as_str()
+        .unwrap()
+        .contains("CAP_NET_RAW"));
+    assert!(entry["last_success_at"].is_null());
+
+    // Visible, but not stored: no scan row, so it cannot count as a miss.
+    let scans: i64 = sqlx::query_scalar("SELECT count(*) FROM discovery_scans")
+        .fetch_one(&h.pool)
+        .await
+        .unwrap();
+    assert_eq!(scans, 0);
 }
