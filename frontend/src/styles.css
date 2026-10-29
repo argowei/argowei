@@ -14,3 +14,85 @@
 body {
   margin: 0;
 }
+
+.card {
+  width: min(34rem, 100%);
+  padding: 2.5rem;
+  border: 1px solid #263849;
+  border-radius: 1rem;
+  background: #111d28;
+  box-shadow: 0 1.5rem 5rem #0006;
+}
+
+.card h1 {
+  margin: 0.5rem 0 1rem;
+  font-size: clamp(2.5rem, 10vw, 4.5rem);
+}
+
+.eyebrow {
+  color: #65d6ad;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+label {
+  display: block;
+  margin: 1rem 0 0.35rem;
+  color: #aebdcc;
+  font-size: 0.875rem;
+}
+
+input {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #263849;
+  border-radius: 0.5rem;
+  background: #0b1722;
+  color: inherit;
+  font: inherit;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid #65d6ad;
+  outline-offset: 2px;
+}
+
+button {
+  margin-top: 1.5rem;
+  padding: 0.7rem 1.2rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: #65d6ad;
+  color: #09131c;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  margin: 0;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #263849;
+  background: transparent;
+  color: inherit;
+  font-weight: 400;
+}
+
+.hint {
+  margin: 0.35rem 0 0;
+  color: #8294a6;
+  font-size: 0.8125rem;
+}
+
+.error {
+  margin: 1rem 0 0;
+  color: #ef6a6a;
+}

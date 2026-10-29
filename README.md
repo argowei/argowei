@@ -92,6 +92,10 @@ Sessions last `ARGOWEI_SESSION_TTL_HOURS` (default 24). Set
 `ARGOWEI_COOKIE_SECURE=true` when serving over HTTPS. Repeated failed logins
 are delayed with exponential backoff (capped at 5 minutes).
 
+The dashboard redirects to `/setup` on a fresh install (paste the token from
+the server log) and to `/login` otherwise. An expired session sends you back
+to the login page and returns you to where you were afterwards.
+
 ### Audit log
 
 Logins, logouts, setup and every other state-changing request are recorded in
