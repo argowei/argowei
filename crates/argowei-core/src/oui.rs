@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 /// `prefix<TAB>organization` per line; `#` starts a comment. Regenerate with
 /// `scripts/update-oui.sh`.
-const EMBEDDED: &str = include_str!("../data/oui.tsv");
+const EMBEDDED: &str = include_str!("../registry/oui.tsv");
 
 const LOCALLY_ADMINISTERED_BIT: u8 = 0b0000_0010;
 
