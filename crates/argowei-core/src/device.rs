@@ -1,6 +1,42 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// How far a device is trusted. New devices start as `Unknown`; only a user
+/// moves a device to another level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrustLevel {
+    Trusted,
+    Normal,
+    Restricted,
+    #[default]
+    Unknown,
+    Suspicious,
+}
+
+impl TrustLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Trusted => "trusted",
+            Self::Normal => "normal",
+            Self::Restricted => "restricted",
+            Self::Unknown => "unknown",
+            Self::Suspicious => "suspicious",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "trusted" => Self::Trusted,
+            "normal" => Self::Normal,
+            "restricted" => Self::Restricted,
+            "unknown" => Self::Unknown,
+            "suspicious" => Self::Suspicious,
+            _ => return None,
+        })
+    }
+}
+
 /// A device is identified by its MAC address. Its IP addresses are tracked
 /// separately in `DeviceAddress`, since a single device can hold several at
 /// once (an IPv4 address via ARP, plus one or more IPv6 addresses via NDP).
@@ -13,6 +49,9 @@ pub struct Device {
     pub label: Option<String>,
     /// Free-text notes written by the user.
     pub notes: String,
+    /// The group the user placed the device in; `None` until classified.
+    pub group_id: Option<i32>,
+    pub trust_level: TrustLevel,
     pub mac_address: String,
     pub is_online: bool,
     pub first_seen: DateTime<Utc>,
@@ -72,11 +111,37 @@ mod tests {
             name: name.to_owned(),
             label: label.map(str::to_owned),
             notes: String::new(),
+            group_id: None,
+            trust_level: TrustLevel::default(),
             mac_address: "aa:bb:cc:00:00:01".to_owned(),
             is_online: true,
             first_seen: Utc::now(),
             last_seen: Utc::now(),
         }
+    }
+
+    #[test]
+    fn new_devices_start_untrusted() {
+        assert_eq!(TrustLevel::default(), TrustLevel::Unknown);
+    }
+
+    #[test]
+    fn trust_levels_round_trip_through_text_and_json() {
+        for level in [
+            TrustLevel::Trusted,
+            TrustLevel::Normal,
+            TrustLevel::Restricted,
+            TrustLevel::Unknown,
+            TrustLevel::Suspicious,
+        ] {
+            assert_eq!(TrustLevel::parse(level.as_str()), Some(level));
+            assert_eq!(
+                serde_json::to_string(&level).unwrap(),
+                format!("\"{}\"", level.as_str())
+            );
+        }
+        assert_eq!(TrustLevel::parse("TRUSTED"), None);
+        assert_eq!(TrustLevel::parse("admin"), None);
     }
 
     #[test]

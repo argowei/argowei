@@ -5,6 +5,7 @@ pub mod devices;
 pub mod discovery;
 pub mod error;
 pub mod events;
+pub mod groups;
 pub mod presence;
 pub mod routes;
 pub mod state;
