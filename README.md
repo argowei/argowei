@@ -170,6 +170,23 @@ The dashboard redirects to `/setup` on a fresh install (paste the token from
 the server log) and to `/login` otherwise. An expired session sends you back
 to the login page and returns you to where you were afterwards.
 
+### Device labels and notes
+
+`PATCH /api/devices/{id}` sets a user label and free-text notes:
+
+```bash
+curl -X PATCH http://localhost:8000/api/devices/1 -b cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"Wohnzimmer TV","notes":"Samsung, hinter dem Schrank"}'
+```
+
+Labels are trimmed, single-line and at most 64 characters; notes are trimmed
+and at most 2000 characters. A missing field is left unchanged; `null` or a
+blank value clears it. `name` keeps what discovery derived and is never
+changed by a user; `display_name` is the label if set, otherwise `name`.
+Discovery never overwrites a label or notes. Changes are audit-logged with the
+before/after values.
+
 ### Audit log
 
 Logins, logouts, setup and every other state-changing request are recorded in
