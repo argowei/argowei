@@ -16,7 +16,7 @@ const printer = device({ id: 2, label: 'Office printer', trust_level: 'normal',
   last_seen: '2026-01-01T12:00:00Z' });
 const phone = device({ id: 3, label: 'Phone', is_online: false, trust_level: 'suspicious',
   last_seen: '2026-01-01T08:00:00Z' });
-const groups: Group[] = [group(4, 'IoT')];
+const groups: Group[] = [group(1, 'Unassigned'), group(4, 'IoT')];
 
 interface Rendered {
   fixture: ComponentFixture<DeviceList>;
@@ -143,7 +143,7 @@ describe('DeviceList', () => {
     choose(r, '#group', '4');
     expect(names(r.el)).toEqual(['Living room TV']);
 
-    choose(r, '#group', 'none');
+    choose(r, '#group', '1');
     expect(names(r.el)).toEqual(['Office printer', 'Phone']);
   });
 

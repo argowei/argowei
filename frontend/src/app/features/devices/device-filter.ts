@@ -4,8 +4,8 @@ export interface DeviceFilter {
   query: string;
   status: 'all' | 'online' | 'offline';
   trust: TrustLevel | 'all';
-  /** A group id, `'none'` for unclassified devices, or `'all'`. */
-  group: number | 'none' | 'all';
+  /** A group id, or `'all'`. */
+  group: number | 'all';
 }
 
 export const NO_FILTER: DeviceFilter = { query: '', status: 'all', trust: 'all', group: 'all' };
@@ -29,7 +29,7 @@ function searchText(device: Device): string {
     device.name,
     device.mac_address,
     device.vendor ?? '',
-    device.group?.name ?? '',
+    device.group.name,
     ...device.addresses.map((address) => address.ip_address),
   ]
     .join(' ')
@@ -43,7 +43,6 @@ export function filterDevices(devices: Device[], filter: DeviceFilter): Device[]
     if (filter.status === 'online' && !device.is_online) return false;
     if (filter.status === 'offline' && device.is_online) return false;
     if (filter.trust !== 'all' && device.trust_level !== filter.trust) return false;
-    if (filter.group === 'none' && device.group_id !== null) return false;
     if (typeof filter.group === 'number' && device.group_id !== filter.group) return false;
 
     const text = searchText(device);
@@ -63,8 +62,6 @@ function compare(a: Device, b: Device, key: SortKey): number {
     case 'trust':
       return TRUST_LEVELS.indexOf(a.trust_level) - TRUST_LEVELS.indexOf(b.trust_level);
     case 'group':
-      // Unclassified devices sort after every group.
-      if (!a.group || !b.group) return Number(!a.group) - Number(!b.group);
       return a.group.name.localeCompare(b.group.name, undefined, { sensitivity: 'base' });
     case 'last_seen':
       return new Date(a.last_seen).getTime() - new Date(b.last_seen).getTime();

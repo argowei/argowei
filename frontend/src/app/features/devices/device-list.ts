@@ -55,7 +55,6 @@ import {
           <label for="group">Group</label>
           <select id="group" (change)="setGroup($event)">
             <option value="all" [selected]="filter().group === 'all'">All</option>
-            <option value="none" [selected]="filter().group === 'none'">No group</option>
             @for (group of groups(); track group.id) {
               <option [value]="group.id" [selected]="filter().group === group.id">{{ group.name }}</option>
             }
@@ -115,7 +114,7 @@ import {
                     </span>
                   </td>
                   <td><span class="pill" [class]="'trust-' + device.trust_level">{{ device.trust_level }}</span></td>
-                  <td class="col-group">{{ device.group?.name ?? '—' }}</td>
+                  <td class="col-group">{{ device.group.name }}</td>
                   <td class="col-seen" [title]="device.last_seen">{{ ago(device.last_seen) }}</td>
                   <td class="col-ip">{{ address(device) }}</td>
                 </tr>
@@ -244,7 +243,7 @@ export class DeviceList {
 
   protected setGroup(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
-    const group = value === 'all' || value === 'none' ? value : Number(value);
+    const group = value === 'all' ? value : Number(value);
     this.filter.update((f) => ({ ...f, group }));
   }
 

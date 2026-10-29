@@ -66,9 +66,10 @@ describe('filterDevices', () => {
     expect(filterDevices(all, { ...NO_FILTER, trust: 'trusted' })).toEqual([]);
   });
 
-  it('filters by group, including devices without one', () => {
+  it('filters by group, including Unassigned', () => {
     expect(ids(filterDevices(all, { ...NO_FILTER, group: 4 }))).toEqual([1, 3]);
-    expect(ids(filterDevices(all, { ...NO_FILTER, group: 'none' }))).toEqual([2]);
+    // The phone was never classified, so it is still in the default group (id 1).
+    expect(ids(filterDevices(all, { ...NO_FILTER, group: 1 }))).toEqual([2]);
   });
 
   it('combines filters', () => {
@@ -100,7 +101,7 @@ describe('sortDevices', () => {
     expect(ids(sortDevices(all, 'trust', 'asc'))).toEqual([1, 3, 2]);
   });
 
-  it('puts devices without a group last, ties broken by name', () => {
+  it('sorts by group name, ties broken by device name', () => {
     expect(ids(sortDevices(all, 'group', 'asc'))).toEqual([3, 1, 2]);
   });
 

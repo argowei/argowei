@@ -51,7 +51,6 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
 
             <label for="group">Group</label>
             <select id="group" name="group" [ngModel]="form().group" (ngModelChange)="patchForm({ group: $event })">
-              <option [ngValue]="null">No group</option>
               @for (group of groups(); track group.id) {
                 <option [ngValue]="group.id">{{ group.name }}</option>
               }
@@ -168,7 +167,7 @@ export class DeviceDetail {
   protected readonly loading = signal(true);
   protected readonly loadError = signal<string | null>(null);
 
-  protected readonly form = signal<FormState>({ label: '', group: null, trust: 'unknown', notes: '' });
+  protected readonly form = signal<FormState>({ label: '', group: 0, trust: 'unknown', notes: '' });
   protected readonly saving = signal(false);
   protected readonly saved = signal(false);
   protected readonly saveError = signal<string | null>(null);
@@ -255,7 +254,7 @@ export class DeviceDetail {
 
 interface FormState {
   label: string;
-  group: number | null;
+  group: number;
   trust: TrustLevel;
   notes: string;
 }

@@ -31,8 +31,9 @@ export interface Device {
   locally_administered_mac: boolean;
   is_online: boolean;
   trust_level: TrustLevel;
-  group_id: number | null;
-  group: GroupRef | null;
+  /** Every device is in exactly one group; new ones start in "Unassigned". */
+  group_id: number;
+  group: GroupRef;
   first_seen: string;
   last_seen: string;
   addresses: DeviceAddress[];
@@ -53,6 +54,6 @@ export interface Group {
 export interface DevicePatch {
   label?: string | null;
   notes?: string;
-  group_id?: number | null;
+  group_id?: number;
   trust_level?: TrustLevel;
 }

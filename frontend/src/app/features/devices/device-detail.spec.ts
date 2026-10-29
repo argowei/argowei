@@ -23,7 +23,7 @@ const stored = device({
       first_seen: '2026-01-01T10:00:00Z', last_seen: '2026-01-01T12:00:00Z' },
   ],
 });
-const groups = [group(4, 'IoT'), group(5, 'Guest')];
+const groups = [group(1, 'Unassigned'), group(4, 'IoT'), group(5, 'Guest')];
 
 describe('diff', () => {
   const form = { label: 'Printer', group: 4, trust: 'normal' as const, notes: 'Hallway' };
@@ -38,9 +38,12 @@ describe('diff', () => {
     expect(diff(stored, { ...form, group: 5, notes: 'New' })).toEqual({ group_id: 5, notes: 'New' });
   });
 
-  it('turns a blank label and "no group" into null', () => {
+  it('turns a blank label into null', () => {
     expect(diff(stored, { ...form, label: '  ' })).toEqual({ label: null });
-    expect(diff(stored, { ...form, group: null })).toEqual({ group_id: null });
+  });
+
+  it('moves a device back to Unassigned by its id, never with null', () => {
+    expect(diff(stored, { ...form, group: 1 })).toEqual({ group_id: 1 });
   });
 });
 
@@ -94,6 +97,14 @@ describe('DeviceDetail', () => {
     expect(el.textContent).toContain('192.168.1.20');
     expect(el.querySelector<HTMLInputElement>('#label')!.value).toBe('Printer');
     expect(el.querySelector<HTMLTextAreaElement>('#notes')!.value).toBe('Hallway');
+  });
+
+  it('offers Unassigned as an ordinary group and has no "no group" option', async () => {
+    const { el } = await render();
+    const options = Array.from(el.querySelectorAll<HTMLOptionElement>('#group option')).map((o) => o.textContent?.trim());
+
+    expect(options).toEqual(['Unassigned', 'IoT', 'Guest']);
+    expect(el.querySelector<HTMLSelectElement>('#group')!.selectedOptions[0].textContent?.trim()).toBe('IoT');
   });
 
   it('offers tabs for features that are still to come, disabled', async () => {
