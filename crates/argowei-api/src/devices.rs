@@ -24,7 +24,7 @@ const AUDIT_EXCERPT_CHARS: usize = 200;
 // the CLI crate without pulling in a database driver), so FromRow mapping
 // for the shared types lives here instead of a derive on the structs
 // themselves.
-struct DeviceRow(Device, Option<String>);
+struct DeviceRow(Device, String);
 
 impl FromRow<'_, PgRow> for DeviceRow {
     fn from_row(row: &PgRow) -> sqlx::Result<Self> {
@@ -93,7 +93,7 @@ struct DeviceWithAddresses {
     /// The user's label if set, otherwise the discovered name.
     display_name: String,
     /// The group the device is in (`group_id` carries just the id).
-    group: Option<GroupRef>,
+    group: GroupRef,
     /// Manufacturer from the IEEE OUI registry; `null` if unknown or the MAC
     /// is locally administered.
     vendor: Option<&'static str>,
@@ -110,12 +110,12 @@ struct GroupRef {
 }
 
 impl DeviceWithAddresses {
-    fn new(device: Device, group_name: Option<String>, addresses: Vec<DeviceAddress>) -> Self {
+    fn new(device: Device, group_name: String, addresses: Vec<DeviceAddress>) -> Self {
         let mac = oui::lookup(&device.mac_address);
-        let group = device
-            .group_id
-            .zip(group_name)
-            .map(|(id, name)| GroupRef { id, name });
+        let group = GroupRef {
+            id: device.group_id,
+            name: group_name,
+        };
         Self {
             display_name: device.display_name().to_owned(),
             group,
@@ -154,7 +154,7 @@ async fn list_with_addresses(
     let devices = sqlx::query_as::<_, DeviceRow>(
         "SELECT d.id, d.name, d.label, d.notes, d.group_id, g.name AS group_name, \
                 d.trust_level, d.mac_address, d.is_online, d.first_seen, d.last_seen \
-         FROM devices d LEFT JOIN device_groups g ON g.id = d.group_id \
+         FROM devices d JOIN device_groups g ON g.id = d.group_id \
          WHERE ($1::int IS NULL OR d.id = $1) ORDER BY d.last_seen DESC",
     )
     .bind(only)
@@ -197,9 +197,10 @@ struct UpdateDevice {
     label: Option<Option<String>>,
     /// Absent: unchanged. Blank: clear the notes.
     notes: Option<String>,
-    /// Absent: unchanged. `null`: remove the device from its group.
-    #[serde(default, deserialize_with = "present")]
-    group_id: Option<Option<i32>>,
+    /// Absent: unchanged. `null` is rejected: every device is in a group,
+    /// and "Unassigned" is one (move a device back by its id).
+    #[serde(default, deserialize_with = "required")]
+    group_id: Option<i32>,
     /// Absent: unchanged. `null` is rejected: there is no "no trust level".
     #[serde(default, deserialize_with = "required")]
     trust_level: Option<TrustLevel>,
@@ -280,19 +281,15 @@ async fn update_device(
     let new_notes = body.notes.as_deref().map(normalize_notes).transpose()?;
 
     let mut tx = state.db.begin().await.map_err(db_error)?;
-    let (old_label, old_notes, old_group, old_trust): (
-        Option<String>,
-        String,
-        Option<i32>,
-        String,
-    ) = sqlx::query_as(
-        "SELECT label, notes, group_id, trust_level FROM devices WHERE id = $1 FOR UPDATE",
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?
-    .ok_or(ApiError::NotFound("no such device"))?;
+    let (old_label, old_notes, old_group, old_trust): (Option<String>, String, i32, String) =
+        sqlx::query_as(
+            "SELECT label, notes, group_id, trust_level FROM devices WHERE id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or(ApiError::NotFound("no such device"))?;
     let old_trust = TrustLevel::parse(&old_trust).ok_or(ApiError::Unavailable)?;
 
     let label = new_label.unwrap_or_else(|| old_label.clone());
@@ -343,18 +340,16 @@ async fn update_device(
             // Names make the audit entry readable after a group is renamed.
             let names: Vec<(i32, String)> =
                 sqlx::query_as("SELECT id, name FROM device_groups WHERE id = ANY($1)")
-                    .bind(old_group.into_iter().chain(group).collect::<Vec<_>>())
+                    .bind(vec![old_group, group])
                     .fetch_all(&mut *tx)
                     .await
                     .map_err(db_error)?;
-            let describe = |group: Option<i32>| {
-                group.map(|id| {
-                    let name = names
-                        .iter()
-                        .find(|(g, _)| *g == id)
-                        .map(|(_, n)| n.as_str());
-                    json!({ "id": id, "name": name })
-                })
+            let describe = |group: i32| {
+                let name = names
+                    .iter()
+                    .find(|(id, _)| *id == group)
+                    .map(|(_, name)| name.as_str());
+                json!({ "id": group, "name": name })
             };
             changes.insert(
                 "group".into(),
@@ -401,7 +396,7 @@ mod tests {
             name: mac.to_owned(),
             label: None,
             notes: String::new(),
-            group_id: None,
+            group_id: 1,
             trust_level: TrustLevel::default(),
             mac_address: mac.to_owned(),
             is_online: true,
@@ -456,7 +451,7 @@ mod tests {
     fn registered_mac_exposes_its_vendor() {
         let json = serde_json::to_value(DeviceWithAddresses::new(
             device("b8:27:eb:12:34:56"),
-            None,
+            "Unassigned".to_owned(),
             vec![],
         ))
         .unwrap();
@@ -470,7 +465,7 @@ mod tests {
     fn unknown_mac_has_null_vendor() {
         let json = serde_json::to_value(DeviceWithAddresses::new(
             device("0c:0d:0e:33:44:55"),
-            None,
+            "Unassigned".to_owned(),
             vec![],
         ))
         .unwrap();
@@ -483,7 +478,7 @@ mod tests {
     fn randomized_mac_is_flagged_instead_of_given_a_vendor() {
         let json = serde_json::to_value(DeviceWithAddresses::new(
             device("1a:56:ce:30:fa:6c"),
-            None,
+            "Unassigned".to_owned(),
             vec![],
         ))
         .unwrap();
