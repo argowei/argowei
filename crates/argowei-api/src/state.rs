@@ -5,12 +5,15 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::auth::AuthState;
 use crate::config::Settings;
+use crate::discovery::DiscoveryStatus;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub redis: redis::Client,
     pub auth: Arc<AuthState>,
+    /// In-memory outcome of the latest discovery scans (not persisted).
+    pub discovery: DiscoveryStatus,
 }
 
 impl AppState {
@@ -41,6 +44,7 @@ impl AppState {
             db,
             redis,
             auth: Arc::new(auth),
+            discovery: DiscoveryStatus::default(),
         }
     }
 }

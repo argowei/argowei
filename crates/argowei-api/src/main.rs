@@ -19,6 +19,7 @@ async fn main() {
         state.db.clone(),
         Arc::new(ArpScanner),
         InterfaceLocks::default(),
+        state.discovery.clone(),
         DiscoveryConfig::from(&settings),
     );
     let app = routes::router(state).into_make_service_with_connect_info::<SocketAddr>();
