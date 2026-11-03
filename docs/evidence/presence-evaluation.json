@@ -1,0 +1,162 @@
+[
+  {
+    "scenario": "intermittent_replies",
+    "rule": "production_and",
+    "completed_scans": 6,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "intermittent_replies",
+    "rule": "time_only_15m",
+    "completed_scans": 6,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "intermittent_replies",
+    "rule": "misses_only_3",
+    "completed_scans": 6,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "intermittent_replies",
+    "rule": "one_miss",
+    "completed_scans": 6,
+    "false_offline": 3,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "actual_departure",
+    "rule": "production_and",
+    "completed_scans": 7,
+    "false_offline": 0,
+    "missed_offline": 2,
+    "first_detection_minute": 25
+  },
+  {
+    "scenario": "actual_departure",
+    "rule": "time_only_15m",
+    "completed_scans": 7,
+    "false_offline": 0,
+    "missed_offline": 2,
+    "first_detection_minute": 25
+  },
+  {
+    "scenario": "actual_departure",
+    "rule": "misses_only_3",
+    "completed_scans": 7,
+    "false_offline": 0,
+    "missed_offline": 2,
+    "first_detection_minute": 25
+  },
+  {
+    "scenario": "actual_departure",
+    "rule": "one_miss",
+    "completed_scans": 7,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": 15
+  },
+  {
+    "scenario": "scanner_gap",
+    "rule": "production_and",
+    "completed_scans": 3,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "scanner_gap",
+    "rule": "time_only_15m",
+    "completed_scans": 3,
+    "false_offline": 1,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "scanner_gap",
+    "rule": "misses_only_3",
+    "completed_scans": 3,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "scanner_gap",
+    "rule": "one_miss",
+    "completed_scans": 3,
+    "false_offline": 1,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "sleeping_device",
+    "rule": "production_and",
+    "completed_scans": 6,
+    "false_offline": 2,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "sleeping_device",
+    "rule": "time_only_15m",
+    "completed_scans": 6,
+    "false_offline": 2,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "sleeping_device",
+    "rule": "misses_only_3",
+    "completed_scans": 6,
+    "false_offline": 2,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "sleeping_device",
+    "rule": "one_miss",
+    "completed_scans": 6,
+    "false_offline": 4,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "rapid_misses",
+    "rule": "production_and",
+    "completed_scans": 5,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "rapid_misses",
+    "rule": "time_only_15m",
+    "completed_scans": 5,
+    "false_offline": 0,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "rapid_misses",
+    "rule": "misses_only_3",
+    "completed_scans": 5,
+    "false_offline": 1,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  },
+  {
+    "scenario": "rapid_misses",
+    "rule": "one_miss",
+    "completed_scans": 5,
+    "false_offline": 3,
+    "missed_offline": 0,
+    "first_detection_minute": null
+  }
+]

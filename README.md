@@ -3,6 +3,14 @@
 Argowei is a self-hosted network intelligence and device management platform
 for homelabs and private infrastructure.
 
+## Research and evidence
+
+The [presence evaluation](docs/PRESENCE-EVALUATION.md) runs the production
+decision rule on deterministic traces and compares it with three simpler
+rules. It records both avoided false offline states and the remaining sleep
+failure case, with [machine-readable results](docs/evidence/presence-evaluation.json)
+checked in CI. This is a synthetic experiment; field accuracy remains open.
+
 ## Development
 
 Start the application with Docker Compose:

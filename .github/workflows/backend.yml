@@ -6,6 +6,8 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "docs/PRESENCE-EVALUATION.md"
+      - "docs/evidence/presence-evaluation.json"
       - ".github/workflows/backend.yml"
   push:
     branches:
@@ -14,6 +16,8 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "docs/PRESENCE-EVALUATION.md"
+      - "docs/evidence/presence-evaluation.json"
       - ".github/workflows/backend.yml"
 
 permissions:
@@ -61,3 +65,8 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      - name: Verify presence evaluation
+        run: |
+          cargo test --locked -p argowei-api --example presence_evaluation
+          cargo run --locked -q -p argowei-api --example presence_evaluation | diff - docs/evidence/presence-evaluation.json
