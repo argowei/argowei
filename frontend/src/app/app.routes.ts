@@ -15,6 +15,11 @@ export const routes: Routes = [
     loadComponent: () => import('./features/devices/device-detail').then((m) => m.DeviceDetail),
   },
   {
+    path: 'alerts',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/alerts/alert-list').then((m) => m.AlertList),
+  },
+  {
     path: 'login',
     canActivate: [loginGuard],
     loadComponent: () => import('./features/login/login').then((m) => m.Login),

@@ -5,7 +5,7 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 
 use crate::state::AppState;
-use crate::{audit, auth, devices, discovery, groups};
+use crate::{alerts, audit, auth, devices, discovery, groups};
 
 /// Everything except `/api`, `/api/health` and the login/setup endpoints
 /// requires a valid session. New routes belong in `protected` unless there
@@ -20,6 +20,7 @@ pub fn router(state: AppState) -> Router {
         .merge(devices::router())
         .merge(discovery::router())
         .merge(groups::router())
+        .merge(alerts::router())
         .merge(audit::router())
         .merge(auth::protected_router())
         .route_layer(from_fn_with_state(state.clone(), auth::require_auth));

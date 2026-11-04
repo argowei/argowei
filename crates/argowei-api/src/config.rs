@@ -31,6 +31,9 @@ pub struct Settings {
     pub offline_after_missed_scans: u32,
     /// Minimum time since last seen before a device may be marked offline.
     pub offline_after_secs: u64,
+    /// How long after an interface's first scan new devices are still learned
+    /// silently instead of raising an alert. 0 = only the first scan.
+    pub baseline_window_secs: u64,
 }
 
 impl Settings {
@@ -69,6 +72,7 @@ impl Settings {
             offline_after_missed_scans: bounded("ARGOWEI_OFFLINE_AFTER_MISSED_SCANS", 3, 1, 1_000)
                 as u32,
             offline_after_secs: bounded("ARGOWEI_OFFLINE_AFTER_SECS", 900, 0, 604_800),
+            baseline_window_secs: bounded("ARGOWEI_BASELINE_WINDOW_SECS", 0, 0, 2_592_000),
         }
     }
 

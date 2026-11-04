@@ -260,6 +260,35 @@ curl -X PATCH http://localhost:8000/api/devices/1 -b cookies.txt \
 `confidence`, `evidence`). The classifier is a heuristic; MAC addresses and
 hostnames can be wrong or spoofed.
 
+### Alerts for new devices
+
+When a device appears that Argowei has never seen, it raises exactly one alert
+(`device.new`, severity `warning`); the database enforces the "exactly one".
+Alerts have a life cycle, `open` → `acknowledged` → `resolved` (an open alert
+can also be resolved directly), and every step is audit-logged.
+
+A fresh install would otherwise alert for every device already on the network,
+so each interface has a **baseline**: devices found in its first scan are
+learned silently, and so are devices found within the next
+`ARGOWEI_BASELINE_WINDOW_SECS` (default `0`, meaning only the first scan; e.g.
+`86400` keeps learning for a day so devices that were asleep during the first
+scan do not alert). A newly added interface gets its own baseline. The
+dashboard shows a banner while the baseline is pending or still learning, and a
+badge with the open alerts in the navigation.
+
+```bash
+curl 'http://localhost:8000/api/alerts?status=active' -b cookies.txt   # active (default) | open | acknowledged | resolved | all
+curl http://localhost:8000/api/alerts/status -b cookies.txt            # counts + baseline state
+curl -X POST http://localhost:8000/api/alerts/1/acknowledge -b cookies.txt
+curl -X POST http://localhost:8000/api/alerts/1/resolve -b cookies.txt
+```
+
+Each alert carries `suggested_actions`. *Trust* and *Restrict* only classify
+the device (trust level) and then resolve the alert. *Block* and *Quarantine*
+are listed but disabled until enforcement (gateway or router integration)
+exists. Alerts are not pushed over a WebSocket yet; the dashboard polls every
+15 seconds.
+
 ### Audit log
 
 Logins, logouts, setup and every other state-changing request are recorded in
