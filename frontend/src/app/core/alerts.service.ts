@@ -25,9 +25,9 @@ export class AlertsService {
 
   /** Also publishes the result on `status`, so the navigation badge follows. */
   loadStatus(): Observable<AlertsStatus> {
-    return this.http.get<AlertsStatus>('/api/alerts/status').pipe(
-      tap((status) => this.status.set(status)),
-    );
+    return this.http
+      .get<AlertsStatus>('/api/alerts/status')
+      .pipe(tap((status) => this.status.set(status)));
   }
 
   acknowledge(id: number): Observable<Alert> {

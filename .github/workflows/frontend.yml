@@ -24,12 +24,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Skip when frontend is not present
-        if: ${{ hashFiles('frontend/package-lock.json') == '' }}
-        run: echo "frontend/package-lock.json not found; nothing to build."
-
       - name: Setup Node.js
-        if: ${{ hashFiles('frontend/package-lock.json') != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -37,16 +32,21 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        if: ${{ hashFiles('frontend/package-lock.json') != '' }}
         working-directory: frontend
         run: npm ci
 
+      - name: Check formatting
+        working-directory: frontend
+        run: npm run format:check
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
       - name: Build
-        if: ${{ hashFiles('frontend/package-lock.json') != '' }}
         working-directory: frontend
         run: npm run build
 
       - name: Test
-        if: ${{ hashFiles('frontend/package-lock.json') != '' }}
         working-directory: frontend
         run: npm test -- --watch=false

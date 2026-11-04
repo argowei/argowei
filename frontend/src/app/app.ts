@@ -29,7 +29,11 @@ interface HealthResponse {
           </a>
         </nav>
         <span class="spacer"></span>
-        <span class="health" [class.online]="backend() === 'connected'" [title]="'Backend: ' + backend()">
+        <span
+          class="health"
+          [class.online]="backend() === 'connected'"
+          [title]="'Backend: ' + backend()"
+        >
           <span class="dot" aria-hidden="true"></span>
           <span class="visually-hidden">Backend: </span>{{ backend() }}
         </span>
@@ -53,18 +57,57 @@ interface HealthResponse {
       color: var(--muted);
     }
 
-    .brand { color: var(--accent); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-             font-size: 0.85rem; text-decoration: none; }
-    nav a { color: var(--muted); text-decoration: none; padding: 0.3rem 0.1rem; }
-    nav { display: flex; gap: 1rem; }
-    nav a.active { color: var(--text); border-bottom: 2px solid var(--accent); }
-    .badge { margin-left: 0.3rem; padding: 0 0.45rem; border-radius: 1rem; background: var(--warn);
-             color: var(--bg); font-size: 0.75rem; font-weight: 700; }
-    .spacer { flex: 1; }
-    .health { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
-    .health.online { color: var(--accent); }
-    .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--danger); }
-    .health.online .dot { background: var(--accent); }
+    .brand {
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 0.85rem;
+      text-decoration: none;
+    }
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      padding: 0.3rem 0.1rem;
+    }
+    nav {
+      display: flex;
+      gap: 1rem;
+    }
+    nav a.active {
+      color: var(--text);
+      border-bottom: 2px solid var(--accent);
+    }
+    .badge {
+      margin-left: 0.3rem;
+      padding: 0 0.45rem;
+      border-radius: 1rem;
+      background: var(--warn);
+      color: var(--bg);
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .health {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+    }
+    .health.online {
+      color: var(--accent);
+    }
+    .dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: var(--danger);
+    }
+    .health.online .dot {
+      background: var(--accent);
+    }
 
     main {
       max-width: 72rem;

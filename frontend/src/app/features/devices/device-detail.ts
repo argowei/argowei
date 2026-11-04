@@ -48,7 +48,9 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
         <div class="tabs" role="tablist" aria-label="Device sections">
           <button type="button" role="tab" aria-selected="true" class="tab active">Overview</button>
           @for (tab of futureTabs; track tab) {
-            <button type="button" role="tab" class="tab" disabled title="Coming soon">{{ tab }}</button>
+            <button type="button" role="tab" class="tab" disabled title="Coming soon">
+              {{ tab }}
+            </button>
           }
         </div>
 
@@ -57,36 +59,68 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
             <h2 id="edit-title">Details</h2>
 
             <label for="label">Label</label>
-            <input id="label" name="label" maxlength="64" autocomplete="off"
-                   [placeholder]="d.name" [ngModel]="form().label" (ngModelChange)="patchForm({ label: $event })" />
-            <p class="hint">Shown instead of the discovered name ({{ d.name }}{{ nameNote(d) }}).</p>
+            <input
+              id="label"
+              name="label"
+              maxlength="64"
+              autocomplete="off"
+              [placeholder]="d.name"
+              [ngModel]="form().label"
+              (ngModelChange)="patchForm({ label: $event })"
+            />
+            <p class="hint">
+              Shown instead of the discovered name ({{ d.name }}{{ nameNote(d) }}).
+            </p>
 
             <label for="group">Group</label>
-            <select id="group" name="group" [ngModel]="form().group" (ngModelChange)="patchForm({ group: $event })">
+            <select
+              id="group"
+              name="group"
+              [ngModel]="form().group"
+              (ngModelChange)="patchForm({ group: $event })"
+            >
               @for (group of groups(); track group.id) {
                 <option [ngValue]="group.id">{{ group.name }}</option>
               }
             </select>
 
             <label for="type">Device type</label>
-            <select id="type" name="type" [ngModel]="form().type" (ngModelChange)="patchForm({ type: $event })">
+            <select
+              id="type"
+              name="type"
+              [ngModel]="form().type"
+              (ngModelChange)="patchForm({ type: $event })"
+            >
               <option [ngValue]="null">{{ automaticLabel(d) }}</option>
               @for (type of deviceTypes; track type) {
                 <option [ngValue]="type">{{ typeLabels[type] }}</option>
               }
             </select>
-            <p class="hint">Pick a type to override the automatic guess; "Automatic" goes back to it.</p>
+            <p class="hint">
+              Pick a type to override the automatic guess; "Automatic" goes back to it.
+            </p>
 
             <label for="trust">Trust level</label>
-            <select id="trust" name="trust" [ngModel]="form().trust" (ngModelChange)="patchForm({ trust: $event })">
+            <select
+              id="trust"
+              name="trust"
+              [ngModel]="form().trust"
+              (ngModelChange)="patchForm({ trust: $event })"
+            >
               @for (level of trustLevels; track level) {
                 <option [ngValue]="level">{{ level }}</option>
               }
             </select>
 
             <label for="notes">Notes</label>
-            <textarea id="notes" name="notes" rows="5" maxlength="2000"
-                      [ngModel]="form().notes" (ngModelChange)="patchForm({ notes: $event })"></textarea>
+            <textarea
+              id="notes"
+              name="notes"
+              rows="5"
+              maxlength="2000"
+              [ngModel]="form().notes"
+              (ngModelChange)="patchForm({ notes: $event })"
+            ></textarea>
 
             @if (saveError()) {
               <p class="error" role="alert">{{ saveError() }}</p>
@@ -95,8 +129,17 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
               <p class="ok" role="status">Saved.</p>
             }
             <div class="actions">
-              <button type="submit" [disabled]="!dirty() || saving()">{{ saving() ? 'Saving…' : 'Save' }}</button>
-              <button type="button" class="secondary" [disabled]="!dirty() || saving()" (click)="reset()">Reset</button>
+              <button type="submit" [disabled]="!dirty() || saving()">
+                {{ saving() ? 'Saving…' : 'Save' }}
+              </button>
+              <button
+                type="button"
+                class="secondary"
+                [disabled]="!dirty() || saving()"
+                (click)="reset()"
+              >
+                Reset
+              </button>
             </div>
           </form>
 
@@ -107,16 +150,24 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
               <dd>
                 <code>{{ d.mac_address }}</code>
                 @if (d.locally_administered_mac) {
-                  <span class="pill" title="Not assigned by a manufacturer: usually MAC randomization, but also used by virtual interfaces">private MAC</span>
+                  <span
+                    class="pill"
+                    title="Not assigned by a manufacturer: usually MAC randomization, but also used by virtual interfaces"
+                    >private MAC</span
+                  >
                 }
               </dd>
               <dt>Type</dt>
               <dd>
                 {{ typeLabels[d.device_type] }}
-                <span class="pill">{{ d.type_source === 'manual' ? 'set by you' : d.inferred.confidence + ' % sure' }}</span>
+                <span class="pill">{{
+                  d.type_source === 'manual' ? 'set by you' : d.inferred.confidence + ' % sure'
+                }}</span>
               </dd>
               <dt>Manufacturer</dt>
-              <dd>{{ d.vendor ?? (d.locally_administered_mac ? 'Unknown (private MAC)' : 'Unknown') }}</dd>
+              <dd>
+                {{ d.vendor ?? (d.locally_administered_mac ? 'Unknown (private MAC)' : 'Unknown') }}
+              </dd>
               <dt>First seen</dt>
               <dd [title]="d.first_seen">{{ ago(d.first_seen) }}</dd>
               <dt>Last seen</dt>
@@ -127,14 +178,17 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
             @if (d.inferred.evidence.length) {
               <p class="muted hint">
                 The automatic guess is {{ typeLabels[d.inferred.device_type] }}
-                @if (d.inferred.device_type !== 'unknown') { ({{ d.inferred.confidence }} % sure) }
+                @if (d.inferred.device_type !== 'unknown') {
+                  ({{ d.inferred.confidence }} % sure)
+                }
                 based on:
               </p>
               <ul class="evidence">
                 @for (item of d.inferred.evidence; track $index) {
                   <li>
-                    <strong>{{ kindLabel(item) }}</strong>: {{ item.detail }}
-                    → {{ typeLabels[item.type] }} <span class="muted">(+{{ item.weight }} %)</span>
+                    <strong>{{ kindLabel(item) }}</strong
+                    >: {{ item.detail }} → {{ typeLabels[item.type] }}
+                    <span class="muted">(+{{ item.weight }} %)</span>
                   </li>
                 }
               </ul>
@@ -146,12 +200,18 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
             @if (d.addresses.length) {
               <table>
                 <thead>
-                  <tr><th scope="col">IP address</th><th scope="col">Source</th><th scope="col">Last seen</th></tr>
+                  <tr>
+                    <th scope="col">IP address</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Last seen</th>
+                  </tr>
                 </thead>
                 <tbody>
                   @for (address of d.addresses; track address.id) {
                     <tr>
-                      <td><code>{{ address.ip_address }}</code></td>
+                      <td>
+                        <code>{{ address.ip_address }}</code>
+                      </td>
                       <td>{{ address.source.toUpperCase() }}</td>
                       <td [title]="address.last_seen">{{ ago(address.last_seen) }}</td>
                     </tr>
@@ -166,7 +226,11 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
             @if (d.names.length) {
               <table class="names">
                 <thead>
-                  <tr><th scope="col">Source</th><th scope="col">Name</th><th scope="col">Last answered</th></tr>
+                  <tr>
+                    <th scope="col">Source</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">Last answered</th>
+                  </tr>
                 </thead>
                 <tbody>
                   @for (entry of d.names; track entry.source) {
@@ -185,10 +249,15 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
               </table>
               <p class="muted hint">
                 When sources disagree, DHCP beats mDNS, NetBIOS and reverse DNS, in that order.
-                @if (d.label) { Your label "{{ d.label }}" is shown instead of all of them. }
+                @if (d.label) {
+                  Your label "{{ d.label }}" is shown instead of all of them.
+                }
               </p>
             } @else {
-              <p class="muted">No name learned yet. Devices are asked once they are new and then about once an hour.</p>
+              <p class="muted">
+                No name learned yet. Devices are asked once they are new and then about once an
+                hour.
+              </p>
             }
           </div>
         </div>
@@ -196,37 +265,150 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
     </section>
   `,
   styles: `
-    .head { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
-    .head h1 { margin: 0; font-size: 1.6rem; overflow-wrap: anywhere; }
-    .status { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); }
-    .status.online { color: var(--accent); }
-    .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: currentColor; }
-    .tabs { display: flex; gap: 0.3rem; margin: 1rem 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
-    .tab { margin: 0; padding: 0.5rem 0.9rem; border: 0; border-bottom: 2px solid transparent;
-           border-radius: 0; background: none; color: var(--muted); font-weight: 600; cursor: pointer; }
-    .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-    .tab:disabled { opacity: 0.45; cursor: not-allowed; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; align-items: start; }
-    .card { width: auto; padding: 1.4rem; border: 1px solid var(--border); border-radius: 0.8rem;
-            background: var(--bg-card); box-shadow: none; min-width: 0; }
-    .card h2 { margin: 0 0 0.6rem; font-size: 1rem; }
-    .card h2:not(:first-child) { margin-top: 1.4rem; }
-    select, textarea { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 0.5rem;
-                       background: var(--bg-input); color: inherit; font: inherit; }
-    textarea { resize: vertical; }
-    .actions { display: flex; align-items: center; gap: 0.6rem; margin-top: 1.5rem; }
-    .actions button { margin: 0; }
-    .actions button.secondary { padding: 0.7rem 1.2rem; }
-    .ok { margin: 1rem 0 0; color: var(--accent); }
-    dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0; }
-    dt { color: var(--muted); }
-    .evidence { margin: 0.4rem 0 0; padding-left: 1.2rem; }
-    .evidence li { margin: 0.25rem 0; overflow-wrap: anywhere; }
-    dd { margin: 0; overflow-wrap: anywhere; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 0.5rem 0.4rem; text-align: left; border-bottom: 1px solid var(--border); }
-    thead th { font-size: 0.8rem; color: var(--muted); }
-    .state { padding: 2rem; text-align: center; border: 1px dashed var(--border); border-radius: 0.8rem; }
+    .head {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .head h1 {
+      margin: 0;
+      font-size: 1.6rem;
+      overflow-wrap: anywhere;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--muted);
+    }
+    .status.online {
+      color: var(--accent);
+    }
+    .dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .tabs {
+      display: flex;
+      gap: 0.3rem;
+      margin: 1rem 0;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .tab {
+      margin: 0;
+      padding: 0.5rem 0.9rem;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      background: none;
+      color: var(--muted);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tab.active {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+    .tab:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+      gap: 1rem;
+      align-items: start;
+    }
+    .card {
+      width: auto;
+      padding: 1.4rem;
+      border: 1px solid var(--border);
+      border-radius: 0.8rem;
+      background: var(--bg-card);
+      box-shadow: none;
+      min-width: 0;
+    }
+    .card h2 {
+      margin: 0 0 0.6rem;
+      font-size: 1rem;
+    }
+    .card h2:not(:first-child) {
+      margin-top: 1.4rem;
+    }
+    select,
+    textarea {
+      width: 100%;
+      padding: 0.7rem 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      background: var(--bg-input);
+      color: inherit;
+      font: inherit;
+    }
+    textarea {
+      resize: vertical;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-top: 1.5rem;
+    }
+    .actions button {
+      margin: 0;
+    }
+    .actions button.secondary {
+      padding: 0.7rem 1.2rem;
+    }
+    .ok {
+      margin: 1rem 0 0;
+      color: var(--accent);
+    }
+    dl {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.4rem 1rem;
+      margin: 0;
+    }
+    dt {
+      color: var(--muted);
+    }
+    .evidence {
+      margin: 0.4rem 0 0;
+      padding-left: 1.2rem;
+    }
+    .evidence li {
+      margin: 0.25rem 0;
+      overflow-wrap: anywhere;
+    }
+    dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th,
+    td {
+      padding: 0.5rem 0.4rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    thead th {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .state {
+      padding: 2rem;
+      text-align: center;
+      border: 1px dashed var(--border);
+      border-radius: 0.8rem;
+    }
   `,
 })
 export class DeviceDetail {

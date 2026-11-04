@@ -30,17 +30,18 @@ export class AuthService {
     }
 
     return this.http.get<StatusResponse>('/api/auth/status').pipe(
-      switchMap(({ setup_required }): Observable<Session> =>
-        setup_required
-          ? of({ kind: 'setup' })
-          : this.http.get<UserResponse>('/api/auth/me').pipe(
-              map(({ username }): Session => ({ kind: 'authenticated', username })),
-              catchError((error: HttpErrorResponse) =>
-                error.status === 401
-                  ? of<Session>({ kind: 'anonymous' })
-                  : throwError(() => error),
+      switchMap(
+        ({ setup_required }): Observable<Session> =>
+          setup_required
+            ? of({ kind: 'setup' })
+            : this.http.get<UserResponse>('/api/auth/me').pipe(
+                map(({ username }): Session => ({ kind: 'authenticated', username })),
+                catchError((error: HttpErrorResponse) =>
+                  error.status === 401
+                    ? of<Session>({ kind: 'anonymous' })
+                    : throwError(() => error),
+                ),
               ),
-            ),
       ),
       tap((session) => this.session.set(session)),
     );
@@ -61,9 +62,9 @@ export class AuthService {
   }
 
   logout(): Observable<void> {
-    return this.http.post<void>('/api/auth/logout', null).pipe(
-      tap(() => this.session.set({ kind: 'anonymous' })),
-    );
+    return this.http
+      .post<void>('/api/auth/logout', null)
+      .pipe(tap(() => this.session.set({ kind: 'anonymous' })));
   }
 
   /** The server rejected our session (expired or revoked). */
