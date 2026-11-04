@@ -88,10 +88,10 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// Database errors are logged here, once, and answered with a bare 503. This
-/// lets handlers use `?` on any query; the few that turn a specific database
-/// error into something else (a duplicate name into 409) match on it first,
-/// see [`is_unique_violation`] and [`is_foreign_key_violation`].
+/// Database errors are logged here, once, and answered with a generic JSON
+/// 503. This lets handlers use `?` on any query; the few that turn a specific
+/// database error into something else (a duplicate name into 409) match on it
+/// first; see [`is_unique_violation`] and [`is_foreign_key_violation`].
 impl From<sqlx::Error> for ApiError {
     fn from(error: sqlx::Error) -> Self {
         tracing::error!(%error, "database error");
@@ -119,6 +119,8 @@ pub fn is_foreign_key_violation(error: &sqlx::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
+    use axum::http::header::CONTENT_TYPE;
 
     fn status_of(error: ApiError) -> StatusCode {
         error.into_response().status()
@@ -137,6 +139,19 @@ mod tests {
         assert_eq!(
             status_of(ApiError::Unavailable),
             StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn database_errors_return_a_generic_json_response() {
+        let response = ApiError::from(sqlx::Error::PoolClosed).into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({ "error": "service unavailable" })
         );
     }
 
