@@ -5,7 +5,7 @@ import { Subject, catchError, forkJoin, map, merge, of, switchMap, timer } from 
 
 import { describeApiError } from '../../core/api-error';
 import { DEVICE_POLL_MS, DevicesService } from '../../core/devices.service';
-import { Device, Group, TRUST_LEVELS } from '../../core/models';
+import { DEVICE_TYPES, DEVICE_TYPE_LABELS, Device, Group, TRUST_LEVELS } from '../../core/models';
 import { timeAgo } from '../../core/time';
 import {
   DeviceFilter,
@@ -48,6 +48,15 @@ import {
             <option value="all" [selected]="filter().trust === 'all'">All</option>
             @for (level of trustLevels; track level) {
               <option [value]="level" [selected]="filter().trust === level">{{ level }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label for="type">Type</label>
+          <select id="type" (change)="setType($event)">
+            <option value="all" [selected]="filter().type === 'all'">All</option>
+            @for (type of deviceTypes; track type) {
+              <option [value]="type" [selected]="filter().type === type">{{ typeLabels[type] }}</option>
             }
           </select>
         </div>
@@ -113,6 +122,7 @@ import {
                       <span class="dot" aria-hidden="true"></span>{{ device.is_online ? 'Online' : 'Offline' }}
                     </span>
                   </td>
+                  <td class="col-type">{{ typeLabels[device.device_type] }}</td>
                   <td><span class="pill" [class]="'trust-' + device.trust_level">{{ device.trust_level }}</span></td>
                   <td class="col-group">{{ device.group.name }}</td>
                   <td class="col-seen" [title]="device.last_seen">{{ ago(device.last_seen) }}</td>
@@ -156,7 +166,7 @@ import {
       .col-ip, .col-seen { display: none; }
     }
     @media (max-width: 640px) {
-      .col-group { display: none; }
+      .col-group, .col-type { display: none; }
     }
   `,
 })
@@ -165,9 +175,12 @@ export class DeviceList {
   private readonly pollMs = inject(DEVICE_POLL_MS);
 
   protected readonly trustLevels = TRUST_LEVELS;
+  protected readonly deviceTypes = DEVICE_TYPES;
+  protected readonly typeLabels = DEVICE_TYPE_LABELS;
   protected readonly columns: { key: SortKey; label: string; class: string }[] = [
     { key: 'name', label: 'Name', class: 'col-name' },
     { key: 'status', label: 'Status', class: 'col-status' },
+    { key: 'type', label: 'Type', class: 'col-type' },
     { key: 'trust', label: 'Trust', class: 'col-trust' },
     { key: 'group', label: 'Group', class: 'col-group' },
     { key: 'last_seen', label: 'Last seen', class: 'col-seen' },
@@ -239,6 +252,11 @@ export class DeviceList {
   protected setTrust(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as DeviceFilter['trust'];
     this.filter.update((f) => ({ ...f, trust: value }));
+  }
+
+  protected setType(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as DeviceFilter['type'];
+    this.filter.update((f) => ({ ...f, type: value }));
   }
 
   protected setGroup(event: Event): void {

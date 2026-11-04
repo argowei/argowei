@@ -230,6 +230,36 @@ also has one trust level: `trusted`, `normal`, `restricted`, `unknown`
 (default for new devices) or `suspicious`. Discovery never changes either.
 Changes are audit-logged, group changes with the group names.
 
+### Device type
+
+Each device gets a type (`smartphone`, `laptop`, `server`, `iot`, `printer`,
+`router` or `unknown`) inferred by a rule-based classifier in
+`argowei-core::device_type`. It is a pure function: the same signals always give
+the same answer, and it returns every rule that fired with its weight, so the
+dashboard can show *why* a device was called a printer. Signals are the
+manufacturer (from the MAC), a private MAC address, the hostname, open ports and
+mDNS service types. Evidence for one type combines like independent witnesses
+(`1 - Π(1 - w)`), never reaches certainty (capped at 95 %) and is ignored below
+30 %, which yields `unknown`. A signal kind counts once per type.
+
+Today only the manufacturer and the MAC kind are known; hostnames, open ports
+and mDNS feed in as those sources arrive. Devices recorded earlier start as
+`unknown` and are classified the next time a scan sees them.
+
+The inference and the user's decision are stored separately, so re-classifying
+on every scan never overwrites a manual choice:
+
+```bash
+# set a manual type; null goes back to the automatic guess
+curl -X PATCH http://localhost:8000/api/devices/1 -b cookies.txt \
+  -H 'Content-Type: application/json' -d '{"type_override":"printer"}'
+```
+
+`GET /api/devices` returns `device_type` (the type to show), `type_source`
+(`manual` or `inferred`), `type_override` and `inferred` (`device_type`,
+`confidence`, `evidence`). The classifier is a heuristic; MAC addresses and
+hostnames can be wrong or spoofed.
+
 ### Audit log
 
 Logins, logouts, setup and every other state-changing request are recorded in
