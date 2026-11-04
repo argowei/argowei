@@ -117,8 +117,12 @@ pub fn parse_nbstat_response(packet: &[u8]) -> Result<Option<String>, ResolveErr
         .ok_or_else(|| malformed("truncated NetBIOS answer"))?;
 
     let count = usize::from(*rdata.first().ok_or_else(|| malformed("empty name table"))?);
+    // Whole entries only: a count larger than the table, or a trailing
+    // partial entry, must not read past the data.
     let entries = rdata[1..]
-        .chunks_exact(NAME_ENTRY_LEN)
+        .as_chunks::<NAME_ENTRY_LEN>()
+        .0
+        .iter()
         .take(count)
         .map(|entry| {
             let name = String::from_utf8_lossy(&entry[..15]).trim_end().to_owned();
