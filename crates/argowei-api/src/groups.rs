@@ -181,6 +181,8 @@ async fn update_group(
         validate_defaults(defaults)?;
     }
 
+    // Locked until commit, as for devices: the audited "before" values must be
+    // the ones the update replaced.
     let mut tx = state.db.begin().await?;
     let EditableGroup {
         name: old_name,
@@ -283,6 +285,9 @@ async fn delete_group(
     meta: RequestMeta,
     Path(id): Path<i32>,
 ) -> Result<Response, ApiError> {
+    // Lock the group so a concurrent rename cannot change what the audit
+    // entry names. A device moved into the group meanwhile is caught by the
+    // foreign key, not by the count read here.
     let mut tx = state.db.begin().await?;
     let GroupToDelete {
         name,

@@ -19,19 +19,25 @@ use pnet::packet::{MutablePacket, Packet};
 const ETHERNET_HEADER_LEN: usize = 14;
 const ARP_PACKET_LEN: usize = 28;
 
+/// Why a scan could not run. A host that does not answer is not an error.
 #[derive(Debug)]
 pub enum ArpScanError {
     InterfaceNotFound(String),
     InterfaceHasNoIpv4(String),
     InterfaceHasNoMac(String),
+    /// The interface's prefix is outside /22../32 (too many hosts to ask).
     InvalidSubnet(u8),
+    /// The response window is outside 1 ms..60 s.
     InvalidTimeout,
     ReceiverPanicked,
+    /// The raw datalink channel could not be opened, for a reason other
+    /// than missing privileges.
     NoChannel(String),
     /// Opening the raw socket was refused: the process lacks root or
     /// CAP_NET_RAW. Kept separate from `NoChannel` so callers can show an
     /// actionable message instead of a bare OS error.
     MissingPrivileges(String),
+    /// Sending or receiving a frame failed.
     Io(std::io::Error),
 }
 
@@ -68,6 +74,8 @@ impl From<std::io::Error> for ArpScanError {
     }
 }
 
+/// A host that answered: the IP it was asked for and the MAC it answered
+/// with. The MAC is whatever the host claims (ARP is not authenticated).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredHost {
     pub ip: Ipv4Addr,

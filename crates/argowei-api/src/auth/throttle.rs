@@ -1,3 +1,5 @@
+//! Per-account backoff after failed logins.
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

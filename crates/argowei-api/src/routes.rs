@@ -1,3 +1,5 @@
+//! The HTTP app: which routes need a session, and the middleware order.
+
 use axum::extract::State;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::get;
@@ -28,8 +30,15 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(public)
         .merge(protected)
-        // Layers added later wrap earlier ones: the audit layer sees the
-        // outcome of authentication, and the origin check runs first.
+        // Layers added later wrap earlier ones, so a request passes
+        // check_origin -> audit_mutations -> require_auth -> handler:
+        // - the origin check runs first: a cross-origin write is refused
+        //   before anything else and is not audited (it is nobody's action,
+        //   and any web page could otherwise fill the audit log);
+        // - the audit layer wraps authentication, so requests denied there
+        //   (401) are recorded, attributed via the user extension that
+        //   require_auth puts on the response.
+        // Pinned by `middleware_runs_origin_check_then_audit_then_auth`.
         .layer(from_fn_with_state(state.clone(), audit::audit_mutations))
         .layer(from_fn(auth::check_origin))
         .with_state(state)

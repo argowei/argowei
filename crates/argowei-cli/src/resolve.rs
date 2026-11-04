@@ -1,3 +1,5 @@
+//! `argowei resolve`: what each name source says about the given addresses.
+
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;

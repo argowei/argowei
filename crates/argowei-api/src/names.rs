@@ -285,6 +285,8 @@ async fn refresh_displayed_name(
         return Ok(false);
     };
 
+    // Locked so two lookups of the same device cannot both see the old name
+    // and both record the rename.
     let (current_name, current_source): (String, Option<String>) =
         sqlx::query_as("SELECT name, name_source FROM devices WHERE id = $1 FOR UPDATE")
             .bind(device_id)

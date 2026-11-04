@@ -475,6 +475,8 @@ async fn transition(
     Path(id): Path<i64>,
     step: Transition,
 ) -> Result<Response, ApiError> {
+    // Lock the alert so two concurrent clicks cannot both see it open and
+    // both record the transition.
     let mut tx = state.db.begin().await?;
     let alert: LockedAlert =
         sqlx::query_as("SELECT status, type, device_id FROM alerts WHERE id = $1 FOR UPDATE")

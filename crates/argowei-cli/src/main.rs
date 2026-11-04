@@ -1,3 +1,7 @@
+//! `argowei`: command-line tools for looking at the local network without
+//! the API: list interfaces, run one ARP scan, ask the name sources about a
+//! device.
+
 use std::error::Error;
 use std::process::ExitCode;
 

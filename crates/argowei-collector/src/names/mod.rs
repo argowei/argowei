@@ -51,10 +51,15 @@ impl Target {
     }
 }
 
+/// Why a lookup failed. "No name" is not an error: see
+/// [`HostnameResolver::resolve`].
 #[derive(Debug)]
 pub enum ResolveError {
+    /// A socket or file operation failed (e.g. an unreadable lease file).
     Io(io::Error),
+    /// A DNS or mDNS answer could not be parsed, or the server failed.
     Dns(DnsError),
+    /// A NetBIOS answer could not be parsed.
     Malformed(&'static str),
     /// Queries only go to the local network.
     NotLocal(Ipv4Addr),
@@ -99,6 +104,7 @@ impl From<DnsError> for ResolveError {
 
 /// One way of learning a device's name.
 pub trait HostnameResolver: Send + Sync {
+    /// The source every answer of this resolver is attributed to.
     fn source(&self) -> NameSource;
 
     /// `Ok(None)` means the source has no (usable) name for this device,
@@ -107,6 +113,8 @@ pub trait HostnameResolver: Send + Sync {
     fn resolve(&self, target: &Target, timeout: Duration) -> Result<Option<String>, ResolveError>;
 }
 
+/// A name one source gave for a target. Already cleaned up
+/// (`argowei_core::names::sanitize_name`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedName {
     pub source: NameSource,
@@ -117,6 +125,7 @@ pub struct ResolvedName {
 #[derive(Debug)]
 pub struct TargetNames {
     pub target: Target,
+    /// At most one per source, in resolver order.
     pub names: Vec<ResolvedName>,
     /// Resolvers whose lookup failed; informational, never fatal.
     pub errors: Vec<(NameSource, String)>,

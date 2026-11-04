@@ -1,3 +1,8 @@
+//! `GET /api/devices`, `GET /api/devices/{id}` and `PATCH /api/devices/{id}`:
+//! the device inventory and the fields a user may edit (label, notes, group,
+//! trust level, type override). Every edit is audited with the old and new
+//! values.
+
 use argowei_core::device::{
     AddressSource, Device, DeviceAddress, IpProtocol, TrustLevel, TypeSource,
 };
@@ -363,6 +368,9 @@ async fn update_device(
         .transpose()?;
     let new_notes = body.notes.as_deref().map(normalize_notes).transpose()?;
 
+    // The row stays locked until commit: the values read here are what the
+    // audit entry reports as "before", so no concurrent edit may land between
+    // this read and the update.
     let mut tx = state.db.begin().await?;
     let EditableDevice {
         label: old_label,

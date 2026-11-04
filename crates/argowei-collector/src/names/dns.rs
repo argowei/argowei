@@ -18,15 +18,20 @@ const MAX_NAME: usize = 255;
 /// A legitimate name never needs more jumps than it has labels.
 const MAX_POINTER_JUMPS: usize = 64;
 
+/// What is wrong with a DNS packet or answer.
 #[derive(Debug, PartialEq, Eq)]
 pub enum DnsError {
     /// A label is empty or longer than 63 bytes.
     InvalidLabel,
+    /// The packet ends before a length it announced.
     Truncated,
     /// A compression pointer points outside the packet or loops.
     BadPointer,
+    /// A name is longer than 255 bytes.
     NameTooLong,
+    /// The packet is a query, not a response.
     NotAResponse,
+    /// The response answers a different query.
     IdMismatch,
     /// The server answered with an error other than "no such name".
     ServerFailure(u8),

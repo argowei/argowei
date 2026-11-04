@@ -3,17 +3,17 @@
 //!
 //! The pipeline, per interface and tick:
 //!
-//! 1. [`schedule`]: a timer per interface calls [`run_scan`], which takes the
+//! 1. `schedule`: a timer per interface calls [`run_scan`], which takes the
 //!    interface's lock (scans never overlap) and runs the blocking ARP scan on
 //!    the blocking thread pool.
-//! 2. [`persist`]: [`record_scan`] stores the result in one transaction:
+//! 2. `persist`: [`record_scan`] stores the result in one transaction:
 //!    the scan row, each device and address, the sighting (the evidence that a
 //!    device answered), the device type inference, `device.*` events, a
 //!    `device.new` alert outside the baseline, and offline marking for devices
 //!    that stayed silent long enough.
 //! 3. Name lookups ([`crate::names`]) run afterwards in a step of their own,
 //!    so nothing they do can fail or delay the stored scan.
-//! 4. [`status`]: the outcome of each attempt, including failures that store
+//! 4. `status`: the outcome of each attempt, including failures that store
 //!    nothing, is kept in memory for `GET /api/discovery/status`.
 //!
 //! Scanning goes through the [`Scanner`] trait so all of the above can be

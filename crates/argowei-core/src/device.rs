@@ -1,3 +1,7 @@
+//! Devices as Argowei stores and shows them, with their trust level and
+//! addresses. Storage is in the API crate (`devices.rs`), which maps rows to
+//! these types.
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +44,7 @@ impl TrustLevel {
     }
 }
 
+/// Where [`Device::device_type`] comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TypeSource {
@@ -69,9 +74,14 @@ pub struct Device {
     pub type_override: Option<DeviceType>,
     /// What the classifier makes of the device, with the evidence for it.
     pub inferred: Classification,
+    /// Lower case, colon separated; unique.
     pub mac_address: String,
+    /// Whether the device counts as present; see the API's presence policy
+    /// for when a silent device is marked offline.
     pub is_online: bool,
+    /// When a scan first saw the device.
     pub first_seen: DateTime<Utc>,
+    /// When a scan last saw the device.
     pub last_seen: DateTime<Utc>,
 }
 
@@ -87,6 +97,7 @@ impl Device {
         self.type_override.unwrap_or(self.inferred.device_type)
     }
 
+    /// Whether [`Device::device_type`] is the user's or the classifier's.
     pub fn type_source(&self) -> TypeSource {
         if self.type_override.is_some() {
             TypeSource::Manual
@@ -96,6 +107,7 @@ impl Device {
     }
 }
 
+/// The IP version of a [`DeviceAddress`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IpProtocol {
     V4,
@@ -107,7 +119,9 @@ pub enum IpProtocol {
 /// its own schema change — this enum covers what discovery can produce today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AddressSource {
+    /// An ARP reply (IPv4).
     Arp,
+    /// IPv6 neighbor discovery; not collected yet.
     Ndp,
 }
 
@@ -120,6 +134,8 @@ impl AddressSource {
     }
 }
 
+/// An IP address a device was seen with. A device keeps every address it
+/// ever had; `last_seen` tells which are current.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceAddress {
     pub id: i32,

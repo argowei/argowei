@@ -1,3 +1,5 @@
+//! `argowei scan`: one ARP scan, printed with the vendor of each MAC.
+
 use std::error::Error;
 use std::time::Duration;
 

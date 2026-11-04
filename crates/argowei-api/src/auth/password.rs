@@ -1,3 +1,5 @@
+//! Password hashing (Argon2id) and the length limits for admin passwords.
+
 use std::sync::OnceLock;
 
 use argon2::password_hash::rand_core::OsRng;

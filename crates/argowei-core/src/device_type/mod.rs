@@ -22,6 +22,8 @@ pub const MAX_CONFIDENCE: u8 = 95;
 /// Below this the evidence is too thin to name a type.
 pub const MIN_CONFIDENCE: u8 = 30;
 
+/// What kind of device something is. Stored and serialized in lower case
+/// (`"smartphone"`, ...).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceType {
@@ -76,13 +78,18 @@ impl DeviceType {
     }
 }
 
+/// The kind of signal a piece of [`Evidence`] comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceKind {
+    /// The organization the MAC prefix is registered to.
     Vendor,
+    /// The MAC is locally administered (randomized).
     PrivateMac,
     Hostname,
+    /// An open TCP or UDP port.
     Port,
+    /// An advertised mDNS service.
     Mdns,
 }
 
@@ -109,6 +116,7 @@ impl Evidence {
     }
 }
 
+/// The classifier's answer for one device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Classification {
     pub device_type: DeviceType,

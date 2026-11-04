@@ -1,3 +1,6 @@
+//! Settings from environment variables. Every variable, with its default and
+//! meaning, is listed in `docs/CONFIGURATION.md`.
+
 /// Application settings.
 ///
 /// Values are read from environment variables (see .env.example), falling
