@@ -1,13 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
 
-import { Device } from '../../core/models';
-import { device, group } from '../../testing';
+import { Device } from '../../core/device.models';
+import { device, group, providePageTesting, sleep } from '../../testing';
 import { DeviceDetail, diff } from './device-detail';
-
-const sleep = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const stored = device({
   id: 7,
@@ -83,7 +79,7 @@ describe('DeviceDetail', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+      providers: [...providePageTesting()],
     });
     http = TestBed.inject(HttpTestingController);
   });

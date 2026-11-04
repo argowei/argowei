@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, catchError, map, of, switchMap, tap, throwError } from 'rxjs';
+import { API_BASE } from './api';
 
 export type Session =
   | { kind: 'setup' }
@@ -29,12 +30,12 @@ export class AuthService {
       return of(known);
     }
 
-    return this.http.get<StatusResponse>('/api/auth/status').pipe(
+    return this.http.get<StatusResponse>(`${API_BASE}/auth/status`).pipe(
       switchMap(
         ({ setup_required }): Observable<Session> =>
           setup_required
             ? of({ kind: 'setup' })
-            : this.http.get<UserResponse>('/api/auth/me').pipe(
+            : this.http.get<UserResponse>(`${API_BASE}/auth/me`).pipe(
                 map(({ username }): Session => ({ kind: 'authenticated', username })),
                 catchError((error: HttpErrorResponse) =>
                   error.status === 401
@@ -48,7 +49,7 @@ export class AuthService {
   }
 
   login(username: string, password: string): Observable<void> {
-    return this.http.post<UserResponse>('/api/auth/login', { username, password }).pipe(
+    return this.http.post<UserResponse>(`${API_BASE}/auth/login`, { username, password }).pipe(
       tap(({ username }) => this.session.set({ kind: 'authenticated', username })),
       map(() => undefined),
     );
@@ -57,13 +58,13 @@ export class AuthService {
   /** Creates the admin account, then signs in with it. */
   setup(setupToken: string, username: string, password: string): Observable<void> {
     return this.http
-      .post('/api/auth/setup', { setup_token: setupToken, username, password })
+      .post(`${API_BASE}/auth/setup`, { setup_token: setupToken, username, password })
       .pipe(switchMap(() => this.login(username, password)));
   }
 
   logout(): Observable<void> {
     return this.http
-      .post<void>('/api/auth/logout', null)
+      .post<void>(`${API_BASE}/auth/logout`, null)
       .pipe(tap(() => this.session.set({ kind: 'anonymous' })));
   }
 

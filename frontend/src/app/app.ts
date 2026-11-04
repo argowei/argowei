@@ -2,15 +2,24 @@ import { HttpClient } from '@angular/common/http';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { EMPTY, catchError, map, of, switchMap, timer } from 'rxjs';
+import { EMPTY, catchError, map, of, switchMap } from 'rxjs';
 
 import { ALERT_POLL_MS, AlertsService } from './core/alerts.service';
 import { AuthService } from './core/auth.service';
+import { poll } from './core/poll';
+
+/** How often the top bar checks that the API is reachable. */
+const HEALTH_POLL_MS = 30_000;
+import { API_BASE } from './core/api';
 
 interface HealthResponse {
   status: string;
 }
 
+/**
+ * The shell: the top bar (navigation, open-alert badge, backend health,
+ * sign out) while signed in, and the routed page.
+ */
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
@@ -134,10 +143,10 @@ export class App {
   protected readonly openAlerts = computed(() => this.alerts.status()?.open ?? 0);
 
   constructor() {
-    timer(0, 30_000)
+    poll(HEALTH_POLL_MS)
       .pipe(
         switchMap(() =>
-          this.http.get<HealthResponse>('/api/health').pipe(
+          this.http.get<HealthResponse>(`${API_BASE}/health`).pipe(
             map(({ status }) => (status === 'ok' ? 'connected' : 'unknown')),
             catchError(() => of('unavailable')),
           ),
@@ -147,12 +156,13 @@ export class App {
       .subscribe((state) => this.backend.set(state));
 
     // Only ask for alerts while signed in; before that the API answers 401.
-    const alertTicks$ = this.alertPollMs > 0 ? timer(0, this.alertPollMs) : timer(0);
+    // `username` turns into an observable so that signing in starts the loop
+    // and signing out stops it: switchMap drops the old loop on every change.
     toObservable(this.username)
       .pipe(
         switchMap((name) =>
           name
-            ? alertTicks$.pipe(
+            ? poll(this.alertPollMs).pipe(
                 switchMap(() => this.alerts.loadStatus().pipe(catchError(() => EMPTY))),
               )
             : EMPTY,

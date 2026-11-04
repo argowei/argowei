@@ -1,15 +1,10 @@
-import { provideHttpClient } from '@angular/common/http';
-import {
-  HttpTestingController,
-  TestRequest,
-  provideHttpClientTesting,
-} from '@angular/common/http/testing';
+import { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
 
 import { ALERT_POLL_MS } from '../../core/alerts.service';
 import { Alert, AlertPage, AlertsStatus, SuggestedAction } from '../../core/alerts.models';
 import { AlertList } from './alert-list';
+import { providePageTesting } from '../../testing';
 
 const ACTIONS: SuggestedAction[] = [
   { action: 'trust', label: 'Trust', available: true, effect: 'Sets the trust level to trusted.' },
@@ -85,12 +80,7 @@ describe('AlertList', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideRouter([]),
-        { provide: ALERT_POLL_MS, useValue: 0 },
-      ],
+      providers: [...providePageTesting(), { provide: ALERT_POLL_MS, useValue: 0 }],
     });
     http = TestBed.inject(HttpTestingController);
   });

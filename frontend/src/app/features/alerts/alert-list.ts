@@ -1,14 +1,15 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { EMPTY, Observable, catchError, merge, switchMap, tap, timer } from 'rxjs';
+import { EMPTY, Observable, catchError, merge, switchMap, tap } from 'rxjs';
 
 import { describeApiError } from '../../core/api-error';
 import { ALERT_POLL_MS, AlertsService } from '../../core/alerts.service';
 import { Alert, AlertView, SuggestedAction } from '../../core/alerts.models';
 import { DevicesService } from '../../core/devices.service';
-import { TrustLevel } from '../../core/models';
-import { timeAgo } from '../../core/time';
+import { TrustLevel } from '../../core/device.models';
+import { poll } from '../../core/poll';
+import { TimeAgoPipe } from '../../shared/time-ago.pipe';
 
 /** Actions that only classify the device; the rest need enforcement. */
 const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> = {
@@ -16,9 +17,13 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
   restrict: 'restricted',
 };
 
+/**
+ * Alerts, active or resolved, with what can be done about each: acknowledge,
+ * resolve, or classify the device (trust, restrict) and resolve in one go.
+ */
 @Component({
   selector: 'app-alert-list',
-  imports: [RouterLink],
+  imports: [RouterLink, TimeAgoPipe],
   template: `
     <section class="page">
       <header class="page-head">
@@ -100,7 +105,7 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
 
               <p class="meta">
                 {{ details(alert) }} ·
-                <span [title]="alert.created_at">{{ ago(alert.created_at) }}</span>
+                <span [title]="alert.created_at">{{ alert.created_at | timeAgo }}</span>
                 @if (alert.status === 'acknowledged' && alert.acknowledged_by) {
                   · acknowledged by {{ alert.acknowledged_by }}
                 }
@@ -200,28 +205,8 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
       color: var(--bg);
       font-size: 0.75rem;
     }
-    .banner {
-      margin: 1rem 0;
-      padding: 0.7rem 0.9rem;
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-    }
-    .banner.info {
-      border-color: var(--accent);
-    }
-    .banner.warn {
-      border-color: var(--warn);
-      color: var(--warn);
-    }
     .state {
       margin-top: 1rem;
-      padding: 2rem;
-      text-align: center;
-      border: 1px dashed var(--border);
-      border-radius: 0.8rem;
-    }
-    .state button {
-      margin-top: 0.5rem;
     }
     .alerts {
       list-style: none;
@@ -317,16 +302,14 @@ export class AlertList {
     this.load();
     this.api.loadStatus().subscribe({ error: () => undefined });
 
-    if (this.pollMs > 0) {
-      timer(this.pollMs, this.pollMs)
-        .pipe(
-          switchMap(() =>
-            merge(this.refresh(), this.api.loadStatus().pipe(catchError(() => EMPTY))),
-          ),
-          takeUntilDestroyed(inject(DestroyRef)),
-        )
-        .subscribe();
-    }
+    // The first page was just loaded; refresh it in the background from the
+    // next interval on.
+    poll(this.pollMs, { immediate: false })
+      .pipe(
+        switchMap(() => merge(this.refresh(), this.api.loadStatus().pipe(catchError(() => EMPTY)))),
+        takeUntilDestroyed(inject(DestroyRef)),
+      )
+      .subscribe();
   }
 
   protected show(view: AlertView): void {
@@ -471,10 +454,6 @@ export class AlertList {
       payload.ip ? `${payload.ip} on ${payload.interface ?? 'the network'}` : undefined,
     ];
     return parts.filter(Boolean).join(' · ');
-  }
-
-  protected ago(iso: string): string {
-    return timeAgo(iso);
   }
 
   protected endsAt(iso: string | null): string {

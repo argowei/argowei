@@ -11,21 +11,36 @@ import {
   Device,
   DevicePatch,
   DeviceType,
-  Evidence,
-  Group,
   NAME_SOURCE_LABELS,
-  NameSource,
   TRUST_LEVELS,
   TrustLevel,
-} from '../../core/models';
-import { timeAgo } from '../../core/time';
+} from '../../core/device.models';
+import { Group } from '../../core/group.models';
+import { StatusIndicator } from '../../shared/status-indicator';
+import { TimeAgoPipe } from '../../shared/time-ago.pipe';
+import { AddressTable } from './address-table';
+import { NameSources } from './name-sources';
+import { TypeEvidence } from './type-evidence';
 
 /** Tabs that later features will fill in (scans, DNS, CVEs, policy). */
 const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
 
+/**
+ * One device: the user's edits (label, group, type, trust, notes) on the
+ * left, what discovery knows about it on the right. Saving sends only the
+ * fields that changed.
+ */
 @Component({
   selector: 'app-device-detail',
-  imports: [FormsModule, RouterLink],
+  imports: [
+    FormsModule,
+    RouterLink,
+    StatusIndicator,
+    TimeAgoPipe,
+    TypeEvidence,
+    AddressTable,
+    NameSources,
+  ],
   template: `
     <section class="page">
       <p><a routerLink="/devices">← All devices</a></p>
@@ -40,9 +55,7 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
       } @else if (device(); as d) {
         <header class="head">
           <h1>{{ d.display_name }}</h1>
-          <span class="status" [class.online]="d.is_online">
-            <span class="dot" aria-hidden="true"></span>{{ d.is_online ? 'Online' : 'Offline' }}
-          </span>
+          <app-status-indicator [online]="d.is_online" />
         </header>
 
         <div class="tabs" role="tablist" aria-label="Device sections">
@@ -169,96 +182,19 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
                 {{ d.vendor ?? (d.locally_administered_mac ? 'Unknown (private MAC)' : 'Unknown') }}
               </dd>
               <dt>First seen</dt>
-              <dd [title]="d.first_seen">{{ ago(d.first_seen) }}</dd>
+              <dd [title]="d.first_seen">{{ d.first_seen | timeAgo }}</dd>
               <dt>Last seen</dt>
-              <dd [title]="d.last_seen">{{ ago(d.last_seen) }}</dd>
+              <dd [title]="d.last_seen">{{ d.last_seen | timeAgo }}</dd>
             </dl>
 
             <h2>Why this type?</h2>
-            @if (d.inferred.evidence.length) {
-              <p class="muted hint">
-                The automatic guess is {{ typeLabels[d.inferred.device_type] }}
-                @if (d.inferred.device_type !== 'unknown') {
-                  ({{ d.inferred.confidence }} % sure)
-                }
-                based on:
-              </p>
-              <ul class="evidence">
-                @for (item of d.inferred.evidence; track $index) {
-                  <li>
-                    <strong>{{ kindLabel(item) }}</strong
-                    >: {{ item.detail }} → {{ typeLabels[item.type] }}
-                    <span class="muted">(+{{ item.weight }} %)</span>
-                  </li>
-                }
-              </ul>
-            } @else {
-              <p class="muted">Nothing recognisable yet, so the type stays unknown.</p>
-            }
+            <app-type-evidence [device]="d" />
 
             <h2>Addresses</h2>
-            @if (d.addresses.length) {
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">IP address</th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Last seen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (address of d.addresses; track address.id) {
-                    <tr>
-                      <td>
-                        <code>{{ address.ip_address }}</code>
-                      </td>
-                      <td>{{ address.source.toUpperCase() }}</td>
-                      <td [title]="address.last_seen">{{ ago(address.last_seen) }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            } @else {
-              <p class="muted">No addresses recorded.</p>
-            }
+            <app-address-table [addresses]="d.addresses" />
 
             <h2>Discovered names</h2>
-            @if (d.names.length) {
-              <table class="names">
-                <thead>
-                  <tr>
-                    <th scope="col">Source</th>
-                    <th scope="col">Name</th>
-                    <th scope="col">Last answered</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (entry of d.names; track entry.source) {
-                    <tr>
-                      <td>{{ sourceLabel(entry.source) }}</td>
-                      <td>
-                        {{ entry.name }}
-                        @if (entry.source === d.name_source && entry.name === d.name) {
-                          <span class="pill">shown</span>
-                        }
-                      </td>
-                      <td [title]="entry.last_seen">{{ ago(entry.last_seen) }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-              <p class="muted hint">
-                When sources disagree, DHCP beats mDNS, NetBIOS and reverse DNS, in that order.
-                @if (d.label) {
-                  Your label "{{ d.label }}" is shown instead of all of them.
-                }
-              </p>
-            } @else {
-              <p class="muted">
-                No name learned yet. Devices are asked once they are new and then about once an
-                hour.
-              </p>
-            }
+            <app-name-sources [device]="d" />
           </div>
         </div>
       }
@@ -275,21 +211,6 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
       margin: 0;
       font-size: 1.6rem;
       overflow-wrap: anywhere;
-    }
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      color: var(--muted);
-    }
-    .status.online {
-      color: var(--accent);
-    }
-    .dot {
-      width: 0.55rem;
-      height: 0.55rem;
-      border-radius: 50%;
-      background: currentColor;
     }
     .tabs {
       display: flex;
@@ -377,37 +298,9 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
     dt {
       color: var(--muted);
     }
-    .evidence {
-      margin: 0.4rem 0 0;
-      padding-left: 1.2rem;
-    }
-    .evidence li {
-      margin: 0.25rem 0;
-      overflow-wrap: anywhere;
-    }
     dd {
       margin: 0;
       overflow-wrap: anywhere;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th,
-    td {
-      padding: 0.5rem 0.4rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-    thead th {
-      font-size: 0.8rem;
-      color: var(--muted);
-    }
-    .state {
-      padding: 2rem;
-      text-align: center;
-      border: 1px dashed var(--border);
-      border-radius: 0.8rem;
     }
   `,
 })
@@ -521,32 +414,11 @@ export class DeviceDetail {
       : `Automatic (${DEVICE_TYPE_LABELS[device_type]}, ${confidence} %)`;
   }
 
-  protected kindLabel(item: Evidence): string {
-    return KIND_LABELS[item.kind];
-  }
-
-  protected sourceLabel(source: NameSource): string {
-    return NAME_SOURCE_LABELS[source];
-  }
-
   /** ", from mDNS" when a source named the device, nothing while it is just the MAC. */
   protected nameNote(device: Device): string {
     return device.name_source ? `, from ${NAME_SOURCE_LABELS[device.name_source]}` : '';
   }
-
-  protected ago(iso: string): string {
-    return timeAgo(iso);
-  }
 }
-
-/** How an evidence kind is called in the explanation. */
-const KIND_LABELS: Record<Evidence['kind'], string> = {
-  vendor: 'Manufacturer',
-  private_mac: 'MAC address',
-  hostname: 'Hostname',
-  port: 'Open port',
-  mdns: 'Service announcement',
-};
 
 interface FormState {
   label: string;

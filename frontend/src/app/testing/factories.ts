@@ -1,4 +1,5 @@
-import { Device, Group } from './core/models';
+import { Device } from '../core/device.models';
+import { Group } from '../core/group.models';
 
 let nextId = 1;
 

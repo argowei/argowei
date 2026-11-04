@@ -1,12 +1,15 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { Subject, catchError, forkJoin, map, merge, of, switchMap, timer } from 'rxjs';
+import { Subject, catchError, forkJoin, map, merge, of, switchMap } from 'rxjs';
 
 import { describeApiError } from '../../core/api-error';
 import { DEVICE_POLL_MS, DevicesService } from '../../core/devices.service';
-import { DEVICE_TYPES, DEVICE_TYPE_LABELS, Device, Group, TRUST_LEVELS } from '../../core/models';
-import { timeAgo } from '../../core/time';
+import { DEVICE_TYPES, DEVICE_TYPE_LABELS, Device, TRUST_LEVELS } from '../../core/device.models';
+import { Group } from '../../core/group.models';
+import { poll } from '../../core/poll';
+import { StatusIndicator } from '../../shared/status-indicator';
+import { TimeAgoPipe } from '../../shared/time-ago.pipe';
 import {
   DeviceFilter,
   NO_FILTER,
@@ -16,9 +19,13 @@ import {
   sortDevices,
 } from './device-filter';
 
+/**
+ * All devices, filtered and sorted in the browser, refreshed every
+ * `DEVICE_POLL_MS`. A failed refresh keeps the last known list on screen.
+ */
 @Component({
   selector: 'app-device-list',
-  imports: [RouterLink],
+  imports: [RouterLink, StatusIndicator, TimeAgoPipe],
   template: `
     <section class="page">
       <header class="page-head">
@@ -103,7 +110,7 @@ import {
         </div>
       } @else {
         @if (error()) {
-          <p class="banner" role="alert">
+          <p class="banner warn" role="alert">
             Could not refresh: {{ error() }} Showing the last known data.
           </p>
         }
@@ -129,10 +136,7 @@ import {
                     <span class="sub">{{ subtitle(device) }}</span>
                   </th>
                   <td>
-                    <span class="status" [class.online]="device.is_online">
-                      <span class="dot" aria-hidden="true"></span
-                      >{{ device.is_online ? 'Online' : 'Offline' }}
-                    </span>
+                    <app-status-indicator [online]="device.is_online" />
                   </td>
                   <td class="col-type">{{ typeLabels[device.device_type] }}</td>
                   <td>
@@ -141,7 +145,9 @@ import {
                     }}</span>
                   </td>
                   <td class="col-group">{{ device.group.name }}</td>
-                  <td class="col-seen" [title]="device.last_seen">{{ ago(device.last_seen) }}</td>
+                  <td class="col-seen" [title]="device.last_seen">
+                    {{ device.last_seen | timeAgo }}
+                  </td>
                   <td class="col-ip">{{ address(device) }}</td>
                 </tr>
               }
@@ -187,21 +193,6 @@ import {
       background: var(--bg-input);
       color: inherit;
       font: inherit;
-    }
-    .state {
-      padding: 2rem;
-      text-align: center;
-      border: 1px dashed var(--border);
-      border-radius: 0.8rem;
-    }
-    .state button {
-      margin-top: 0.5rem;
-    }
-    .banner {
-      padding: 0.6rem 0.9rem;
-      border: 1px solid var(--warn);
-      border-radius: 0.5rem;
-      color: var(--warn);
     }
     .table-wrap {
       overflow-x: auto;
@@ -253,21 +244,6 @@ import {
       display: block;
       font-size: 0.8rem;
       color: var(--muted);
-    }
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      color: var(--muted);
-    }
-    .status.online {
-      color: var(--accent);
-    }
-    .dot {
-      width: 0.55rem;
-      height: 0.55rem;
-      border-radius: 50%;
-      background: currentColor;
     }
     code {
       font-size: 0.85em;
@@ -323,11 +299,9 @@ export class DeviceList {
   private readonly reloads = new Subject<void>();
 
   constructor() {
-    const ticks$ = this.pollMs > 0 ? timer(0, this.pollMs) : timer(0);
-
     // Polls on a timer; "Retry" triggers an immediate load. switchMap drops a
     // slow response when a newer request has started.
-    merge(ticks$, this.reloads)
+    merge(poll(this.pollMs), this.reloads)
       .pipe(
         switchMap(() =>
           forkJoin({
@@ -423,9 +397,5 @@ export class DeviceList {
     );
     const extra = sorted.length - 1;
     return extra > 0 ? `${sorted[0].ip_address} +${extra}` : sorted[0].ip_address;
-  }
-
-  protected ago(iso: string): string {
-    return timeAgo(iso);
   }
 }

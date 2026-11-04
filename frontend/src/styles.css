@@ -159,3 +159,50 @@ button.secondary {
   color: var(--danger);
   border-color: var(--danger);
 }
+
+/* Loading, empty and error placeholders in place of a page's content. */
+.state {
+  padding: 2rem;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 0.8rem;
+}
+
+.state button {
+  margin-top: 0.5rem;
+}
+
+/* A notice above a page's content; `warn` for problems, `info` for state. */
+.banner {
+  margin: 1rem 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.banner.info {
+  border-color: var(--accent);
+}
+
+.banner.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* Small tables inside a card. */
+table.compact {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table.compact th,
+table.compact td {
+  padding: 0.5rem 0.4rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+table.compact thead th {
+  font-size: 0.8rem;
+  color: var(--muted);
+}

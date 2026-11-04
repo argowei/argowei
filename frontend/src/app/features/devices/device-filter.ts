@@ -4,7 +4,7 @@ import {
   DeviceType,
   TRUST_LEVELS,
   TrustLevel,
-} from '../../core/models';
+} from '../../core/device.models';
 
 export interface DeviceFilter {
   query: string;

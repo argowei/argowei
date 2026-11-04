@@ -1,14 +1,11 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
 
 import { DEVICE_POLL_MS } from '../../core/devices.service';
-import { Device, Group } from '../../core/models';
-import { device, group } from '../../testing';
+import { Device } from '../../core/device.models';
+import { Group } from '../../core/group.models';
+import { device, group, providePageTesting, sleep } from '../../testing';
 import { DeviceList } from './device-list';
-
-const sleep = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const tv = device({
   id: 1,
@@ -45,12 +42,7 @@ interface Rendered {
 describe('DeviceList', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideRouter([]),
-        { provide: DEVICE_POLL_MS, useValue: 0 },
-      ],
+      providers: [...providePageTesting(), { provide: DEVICE_POLL_MS, useValue: 0 }],
     });
   });
 
