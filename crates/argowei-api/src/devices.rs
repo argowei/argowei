@@ -1,4 +1,7 @@
-use argowei_core::device::{AddressSource, Device, DeviceAddress, IpProtocol, TrustLevel};
+use argowei_core::device::{
+    AddressSource, Device, DeviceAddress, IpProtocol, TrustLevel, TypeSource,
+};
+use argowei_core::device_type::{Classification, DeviceType};
 use argowei_core::oui;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -24,6 +27,11 @@ const AUDIT_EXCERPT_CHARS: usize = 200;
 // the CLI crate without pulling in a database driver), so FromRow mapping
 // for the shared types lives here instead of a derive on the structs
 // themselves.
+fn parse_device_type(value: &str) -> sqlx::Result<DeviceType> {
+    DeviceType::parse(value)
+        .ok_or_else(|| sqlx::Error::Decode(format!("unknown device type: {value}").into()))
+}
+
 struct DeviceRow(Device, String);
 
 impl FromRow<'_, PgRow> for DeviceRow {
@@ -33,6 +41,20 @@ impl FromRow<'_, PgRow> for DeviceRow {
             sqlx::Error::Decode(format!("unknown trust level: {trust_level}").into())
         })?;
 
+        let type_override = row
+            .try_get::<Option<String>, _>("type_override")?
+            .map(|value| parse_device_type(&value))
+            .transpose()?;
+        let evidence: serde_json::Value = row.try_get("inferred_evidence")?;
+        let confidence: i16 = row.try_get("inferred_confidence")?;
+        let inferred_type: String = row.try_get("inferred_type")?;
+        let inferred = Classification {
+            device_type: parse_device_type(&inferred_type)?,
+            confidence: u8::try_from(confidence).map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
+            evidence: serde_json::from_value(evidence)
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
+        };
+
         Ok(DeviceRow(
             Device {
                 id: row.try_get("id")?,
@@ -41,6 +63,8 @@ impl FromRow<'_, PgRow> for DeviceRow {
                 notes: row.try_get("notes")?,
                 group_id: row.try_get("group_id")?,
                 trust_level,
+                type_override,
+                inferred,
                 mac_address: row.try_get("mac_address")?,
                 is_online: row.try_get("is_online")?,
                 first_seen: row.try_get("first_seen")?,
@@ -94,6 +118,11 @@ struct DeviceWithAddresses {
     display_name: String,
     /// The group the device is in (`group_id` carries just the id).
     group: GroupRef,
+    /// The type to show: the user's override if set, otherwise the inference
+    /// (`inferred` carries the inference with its evidence).
+    device_type: DeviceType,
+    /// Whether `device_type` was `manual` or `inferred`.
+    type_source: TypeSource,
     /// Manufacturer from the IEEE OUI registry; `null` if unknown or the MAC
     /// is locally administered.
     vendor: Option<&'static str>,
@@ -119,6 +148,8 @@ impl DeviceWithAddresses {
         Self {
             display_name: device.display_name().to_owned(),
             group,
+            device_type: device.device_type(),
+            type_source: device.type_source(),
             device,
             vendor: mac.vendor,
             locally_administered_mac: mac.locally_administered,
@@ -166,7 +197,8 @@ async fn list_with_addresses(
 ) -> Result<Vec<DeviceWithAddresses>, sqlx::Error> {
     let devices = sqlx::query_as::<_, DeviceRow>(
         "SELECT d.id, d.name, d.label, d.notes, d.group_id, g.name AS group_name, \
-                d.trust_level, d.mac_address, d.is_online, d.first_seen, d.last_seen \
+                d.trust_level, d.type_override, d.inferred_type, d.inferred_confidence, \
+                d.inferred_evidence, d.mac_address, d.is_online, d.first_seen, d.last_seen \
          FROM devices d JOIN device_groups g ON g.id = d.group_id \
          WHERE ($1::int IS NULL OR d.id = $1) ORDER BY d.last_seen DESC",
     )
@@ -217,6 +249,10 @@ struct UpdateDevice {
     /// Absent: unchanged. `null` is rejected: there is no "no trust level".
     #[serde(default, deserialize_with = "required")]
     trust_level: Option<TrustLevel>,
+    /// Absent: unchanged. A type sets the manual override; `null` removes it,
+    /// so the inferred type shows again.
+    #[serde(default, deserialize_with = "present")]
+    type_override: Option<Option<DeviceType>>,
 }
 
 /// For fields that may be omitted but, when present, must have a real value
@@ -294,21 +330,31 @@ async fn update_device(
     let new_notes = body.notes.as_deref().map(normalize_notes).transpose()?;
 
     let mut tx = state.db.begin().await.map_err(db_error)?;
-    let (old_label, old_notes, old_group, old_trust): (Option<String>, String, i32, String) =
-        sqlx::query_as(
-            "SELECT label, notes, group_id, trust_level FROM devices WHERE id = $1 FOR UPDATE",
-        )
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(db_error)?
-        .ok_or(ApiError::NotFound("no such device"))?;
+    let (old_label, old_notes, old_group, old_trust, old_type): (
+        Option<String>,
+        String,
+        i32,
+        String,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT label, notes, group_id, trust_level, type_override \
+         FROM devices WHERE id = $1 FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_error)?
+    .ok_or(ApiError::NotFound("no such device"))?;
     let old_trust = TrustLevel::parse(&old_trust).ok_or(ApiError::Unavailable)?;
+    let old_type = old_type
+        .map(|value| DeviceType::parse(&value).ok_or(ApiError::Unavailable))
+        .transpose()?;
 
     let label = new_label.unwrap_or_else(|| old_label.clone());
     let notes = new_notes.unwrap_or_else(|| old_notes.clone());
     let group = body.group_id.unwrap_or(old_group);
     let trust = body.trust_level.unwrap_or(old_trust);
+    let type_override = body.type_override.unwrap_or(old_type);
 
     let mut changes = serde_json::Map::new();
     if label != old_label {
@@ -327,18 +373,26 @@ async fn update_device(
         );
     }
 
+    if type_override != old_type {
+        changes.insert(
+            "type_override".into(),
+            json!({ "from": old_type, "to": type_override }),
+        );
+    }
+
     let changed_group = group != old_group;
     let changed = !changes.is_empty() || changed_group;
     if changed {
         sqlx::query(
-            "UPDATE devices SET label = $2, notes = $3, group_id = $4, trust_level = $5 \
-             WHERE id = $1",
+            "UPDATE devices SET label = $2, notes = $3, group_id = $4, trust_level = $5, \
+                 type_override = $6 WHERE id = $1",
         )
         .bind(id)
         .bind(&label)
         .bind(&notes)
         .bind(group)
         .bind(trust.as_str())
+        .bind(type_override.map(DeviceType::as_str))
         .execute(&mut *tx)
         .await
         .map_err(|error| {
@@ -411,6 +465,8 @@ mod tests {
             notes: String::new(),
             group_id: 1,
             trust_level: TrustLevel::default(),
+            type_override: None,
+            inferred: Classification::default(),
             mac_address: mac.to_owned(),
             is_online: true,
             first_seen: Utc::now(),
