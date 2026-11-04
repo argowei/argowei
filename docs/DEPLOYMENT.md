@@ -20,6 +20,10 @@ interface rather than on your main machine. Gateway/enforcement features
 
 ## 1. Development
 
+Install `sqlx-cli` once with
+`cargo install sqlx-cli --no-default-features --features postgres,rustls`,
+then start the database and API:
+
 ```bash
 docker compose up -d db redis
 sqlx migrate run --database-url postgres://argowei:argowei@localhost:5432/argowei
@@ -60,15 +64,25 @@ The unit grants only `CAP_NET_RAW` (ambient, so no `setcap` is needed) and
 sandboxes the process. Postgres and Redis can run in Docker
 (`docker compose up -d db redis`, bound to loopback) or natively.
 
-Apply migrations before the first start and after each upgrade (see the
-README, "Database migrations").
+Apply migrations before the first start and after each upgrade (see
+[Database migrations](TECHNICAL-REFERENCE.md#database-migrations)).
 
 ## 3. Docker Compose (host network)
 
+The API does not apply schema migrations automatically. With the default
+credentials from `.env.example`, initialize the database before starting all
+services:
+
 ```bash
 cp .env.example .env
+docker compose up -d db redis
+cargo install sqlx-cli --no-default-features --features postgres,rustls  # once
+sqlx migrate run --database-url postgres://argowei:argowei@localhost:5432/argowei
 docker compose up --build
 ```
+
+If you change the PostgreSQL credentials in `.env`, use the matching database
+URL for the migration command.
 
 The `backend` service uses `network_mode: host` so it sees the real LAN, and
 runs with all capabilities dropped except `NET_RAW`. Consequences:
