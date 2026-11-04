@@ -1,13 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
 
-import { Device } from '../../core/models';
-import { device, group } from '../../testing';
+import { Device } from '../../core/device.models';
+import { device, group, providePageTesting, sleep } from '../../testing';
 import { DeviceDetail, diff } from './device-detail';
-
-const sleep = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const stored = device({
   id: 7,
@@ -25,8 +21,15 @@ const stored = device({
   group: { id: 4, name: 'IoT' },
   vendor: 'Brother Industries',
   addresses: [
-    { id: 1, device_id: 7, ip_address: '192.168.1.20', protocol: 'V4', source: 'Arp',
-      first_seen: '2026-01-01T10:00:00Z', last_seen: '2026-01-01T12:00:00Z' },
+    {
+      id: 1,
+      device_id: 7,
+      ip_address: '192.168.1.20',
+      protocol: 'V4',
+      source: 'Arp',
+      first_seen: '2026-01-01T10:00:00Z',
+      last_seen: '2026-01-01T12:00:00Z',
+    },
   ],
 });
 const groups = [group(1, 'Unassigned'), group(4, 'IoT'), group(5, 'Guest')];
@@ -47,7 +50,10 @@ describe('diff', () => {
 
   it('contains only the fields that changed', () => {
     expect(diff(stored, { ...form, trust: 'trusted' })).toEqual({ trust_level: 'trusted' });
-    expect(diff(stored, { ...form, group: 5, notes: 'New' })).toEqual({ group_id: 5, notes: 'New' });
+    expect(diff(stored, { ...form, group: 5, notes: 'New' })).toEqual({
+      group_id: 5,
+      notes: 'New',
+    });
   });
 
   it('turns a blank label into null', () => {
@@ -73,14 +79,17 @@ describe('DeviceDetail', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+      providers: [...providePageTesting()],
     });
     http = TestBed.inject(HttpTestingController);
   });
 
   afterEach(() => http.verify());
 
-  async function render(id = '7', response: Device | 'missing' = stored): Promise<{ fixture: ComponentFixture<DeviceDetail>; el: HTMLElement }> {
+  async function render(
+    id = '7',
+    response: Device | 'missing' = stored,
+  ): Promise<{ fixture: ComponentFixture<DeviceDetail>; el: HTMLElement }> {
     const fixture = TestBed.createComponent(DeviceDetail);
     fixture.componentRef.setInput('id', id);
     fixture.detectChanges();
@@ -100,14 +109,19 @@ describe('DeviceDetail', () => {
     return { fixture, el: fixture.nativeElement as HTMLElement };
   }
 
-  function edit(r: { fixture: ComponentFixture<DeviceDetail>; el: HTMLElement }, selector: string, value: string): void {
+  function edit(
+    r: { fixture: ComponentFixture<DeviceDetail>; el: HTMLElement },
+    selector: string,
+    value: string,
+  ): void {
     const field = r.el.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
     field.value = value;
     field.dispatchEvent(new Event('input'));
     r.fixture.detectChanges();
   }
 
-  const saveButton = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('button[type=submit]')!;
+  const saveButton = (el: HTMLElement) =>
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!;
 
   it('lists what each source called the device and marks the one in use', async () => {
     const named = device({
@@ -124,7 +138,9 @@ describe('DeviceDetail', () => {
     });
     const { el } = await render('7', named);
 
-    const rows = Array.from(el.querySelectorAll('table.names tbody tr')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
+    const rows = Array.from(el.querySelectorAll('table.names tbody tr')).map((r) =>
+      r.textContent?.replace(/\s+/g, ' ').trim(),
+    );
     expect(rows[0]).toContain('DHCP lease');
     expect(rows[0]).toContain('annas-iphone');
     expect(rows[0]).toContain('shown');
@@ -138,13 +154,17 @@ describe('DeviceDetail', () => {
   it('says which source the discovered name comes from next to the label', async () => {
     const { el } = await render('7', device({ ...stored, name: 'iPhone', name_source: 'mdns' }));
 
-    expect(el.querySelector('#label ~ .hint')!.textContent).toContain('discovered name (iPhone, from mDNS)');
+    expect(el.querySelector('#label ~ .hint')!.textContent).toContain(
+      'discovered name (iPhone, from mDNS)',
+    );
   });
 
   it('does not claim a source while the name is still the MAC address', async () => {
     const { el } = await render();
 
-    expect(el.querySelector('#label ~ .hint')!.textContent).toContain('discovered name (aa:bb:cc:00:00:07)');
+    expect(el.querySelector('#label ~ .hint')!.textContent).toContain(
+      'discovered name (aa:bb:cc:00:00:07)',
+    );
     expect(el.querySelector('table.names')).toBeNull();
     expect(el.textContent).toContain('No name learned yet');
   });
@@ -174,11 +194,15 @@ describe('DeviceDetail', () => {
 
   it('explains the automatic type and offers an override', async () => {
     const { el } = await render();
-    const options = Array.from(el.querySelectorAll<HTMLOptionElement>('#type option')).map((o) => o.textContent?.trim());
+    const options = Array.from(el.querySelectorAll<HTMLOptionElement>('#type option')).map((o) =>
+      o.textContent?.trim(),
+    );
 
     expect(options[0]).toBe('Automatic (Printer, 70 %)');
     expect(options).toContain('Router');
-    expect(el.querySelector<HTMLSelectElement>('#type')!.selectedOptions[0].textContent).toContain('Automatic');
+    expect(el.querySelector<HTMLSelectElement>('#type')!.selectedOptions[0].textContent).toContain(
+      'Automatic',
+    );
     expect(el.textContent).toContain('70 % sure');
     const why = el.querySelector('.evidence')!.textContent;
     expect(why).toContain('Manufacturer');
@@ -187,7 +211,14 @@ describe('DeviceDetail', () => {
   });
 
   it('says so when there is nothing to base a type on', async () => {
-    const { el } = await render('7', device({ ...stored, device_type: 'unknown', inferred: { device_type: 'unknown', confidence: 0, evidence: [] } }));
+    const { el } = await render(
+      '7',
+      device({
+        ...stored,
+        device_type: 'unknown',
+        inferred: { device_type: 'unknown', confidence: 0, evidence: [] },
+      }),
+    );
 
     expect(el.querySelector('.evidence')).toBeNull();
     expect(el.textContent).toContain('Nothing recognisable yet');
@@ -198,14 +229,21 @@ describe('DeviceDetail', () => {
     const r = await render();
 
     const select = r.el.querySelector<HTMLSelectElement>('#type')!;
-    select.selectedIndex = Array.from(select.options).findIndex((o) => o.textContent?.trim() === 'Server');
+    select.selectedIndex = Array.from(select.options).findIndex(
+      (o) => o.textContent?.trim() === 'Server',
+    );
     select.dispatchEvent(new Event('change'));
     r.fixture.detectChanges();
     saveButton(r.el).click();
 
     const request = http.expectOne('/api/devices/7');
     expect(request.request.body).toEqual({ type_override: 'server' });
-    request.flush({ ...stored, type_override: 'server', device_type: 'server', type_source: 'manual' });
+    request.flush({
+      ...stored,
+      type_override: 'server',
+      device_type: 'server',
+      type_source: 'manual',
+    });
     r.fixture.detectChanges();
 
     expect(r.el.textContent).toContain('set by you');
@@ -213,17 +251,27 @@ describe('DeviceDetail', () => {
 
   it('offers Unassigned as an ordinary group and has no "no group" option', async () => {
     const { el } = await render();
-    const options = Array.from(el.querySelectorAll<HTMLOptionElement>('#group option')).map((o) => o.textContent?.trim());
+    const options = Array.from(el.querySelectorAll<HTMLOptionElement>('#group option')).map((o) =>
+      o.textContent?.trim(),
+    );
 
     expect(options).toEqual(['Unassigned', 'IoT', 'Guest']);
-    expect(el.querySelector<HTMLSelectElement>('#group')!.selectedOptions[0].textContent?.trim()).toBe('IoT');
+    expect(
+      el.querySelector<HTMLSelectElement>('#group')!.selectedOptions[0].textContent?.trim(),
+    ).toBe('IoT');
   });
 
   it('offers tabs for features that are still to come, disabled', async () => {
     const { el } = await render();
     const tabs = Array.from(el.querySelectorAll<HTMLButtonElement>('[role=tab]'));
 
-    expect(tabs.map((t) => t.textContent?.trim())).toEqual(['Overview', 'Scans', 'DNS', 'CVEs', 'Policy']);
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual([
+      'Overview',
+      'Scans',
+      'DNS',
+      'CVEs',
+      'Policy',
+    ]);
     expect(tabs[0].getAttribute('aria-selected')).toBe('true');
     expect(tabs.slice(1).every((t) => t.disabled)).toBe(true);
   });
@@ -275,7 +323,12 @@ describe('DeviceDetail', () => {
 
     edit(r, '#notes', 'x');
     saveButton(r.el).click();
-    http.expectOne('/api/devices/7').flush({ error: 'notes must not contain control characters' }, { status: 400, statusText: 'Bad Request' });
+    http
+      .expectOne('/api/devices/7')
+      .flush(
+        { error: 'notes must not contain control characters' },
+        { status: 400, statusText: 'Bad Request' },
+      );
     r.fixture.detectChanges();
 
     expect(r.el.querySelector('[role=alert]')!.textContent).toContain('control characters');

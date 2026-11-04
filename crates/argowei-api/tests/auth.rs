@@ -230,6 +230,48 @@ async fn cross_origin_state_changes_are_rejected(pool: PgPool) {
     assert_eq!(same.status, StatusCode::NO_CONTENT);
 }
 
+/// Pins the middleware order in `routes::router`: the origin check runs
+/// first, so a cross-origin request is refused (403) before authentication
+/// could answer 401, and before the audit layer sees it: a forged browser
+/// request is not an action of anyone's, and logging it would let any web
+/// page fill the audit log. A same-origin request without a session reaches
+/// authentication (401), inside the audit layer, and is recorded as denied.
+#[sqlx::test(migrations = "../../migrations")]
+async fn middleware_runs_origin_check_then_audit_then_auth(pool: PgPool) {
+    let h = harness(pool).await;
+
+    let forged = send_with_origin(
+        &h.app,
+        Method::POST,
+        "/api/auth/logout",
+        None,
+        None,
+        Some("http://evil.example"),
+    )
+    .await;
+    assert_eq!(forged.status, StatusCode::FORBIDDEN);
+    assert!(audit_actions(&h.pool).await.is_empty());
+
+    let anonymous = send_with_origin(
+        &h.app,
+        Method::POST,
+        "/api/auth/logout",
+        None,
+        None,
+        Some("http://argowei.test"),
+    )
+    .await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        audit_actions(&h.pool).await,
+        vec![(
+            "anonymous".into(),
+            "http.POST /api/auth/logout".into(),
+            "denied".into()
+        )]
+    );
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn auth_events_are_audited_without_secrets(pool: PgPool) {
     let h = harness(pool).await;

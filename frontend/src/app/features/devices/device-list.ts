@@ -1,12 +1,15 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { Subject, catchError, forkJoin, map, merge, of, switchMap, timer } from 'rxjs';
+import { Subject, catchError, forkJoin, map, merge, of, switchMap } from 'rxjs';
 
 import { describeApiError } from '../../core/api-error';
 import { DEVICE_POLL_MS, DevicesService } from '../../core/devices.service';
-import { DEVICE_TYPES, DEVICE_TYPE_LABELS, Device, Group, TRUST_LEVELS } from '../../core/models';
-import { timeAgo } from '../../core/time';
+import { DEVICE_TYPES, DEVICE_TYPE_LABELS, Device, TRUST_LEVELS } from '../../core/device.models';
+import { Group } from '../../core/group.models';
+import { poll } from '../../core/poll';
+import { StatusIndicator } from '../../shared/status-indicator';
+import { TimeAgoPipe } from '../../shared/time-ago.pipe';
 import {
   DeviceFilter,
   NO_FILTER,
@@ -16,9 +19,13 @@ import {
   sortDevices,
 } from './device-filter';
 
+/**
+ * All devices, filtered and sorted in the browser, refreshed every
+ * `DEVICE_POLL_MS`. A failed refresh keeps the last known list on screen.
+ */
 @Component({
   selector: 'app-device-list',
-  imports: [RouterLink],
+  imports: [RouterLink, StatusIndicator, TimeAgoPipe],
   template: `
     <section class="page">
       <header class="page-head">
@@ -31,8 +38,13 @@ import {
       <form class="filters" role="search" (submit)="$event.preventDefault()">
         <div class="field grow">
           <label for="search">Search</label>
-          <input id="search" type="search" placeholder="Name, MAC, IP, vendor, group"
-                 [value]="filter().query" (input)="setQuery($event)" />
+          <input
+            id="search"
+            type="search"
+            placeholder="Name, MAC, IP, vendor, group"
+            [value]="filter().query"
+            (input)="setQuery($event)"
+          />
         </div>
         <div class="field">
           <label for="status">Status</label>
@@ -56,7 +68,9 @@ import {
           <select id="type" (change)="setType($event)">
             <option value="all" [selected]="filter().type === 'all'">All</option>
             @for (type of deviceTypes; track type) {
-              <option [value]="type" [selected]="filter().type === type">{{ typeLabels[type] }}</option>
+              <option [value]="type" [selected]="filter().type === type">
+                {{ typeLabels[type] }}
+              </option>
             }
           </select>
         </div>
@@ -65,7 +79,9 @@ import {
           <select id="group" (change)="setGroup($event)">
             <option value="all" [selected]="filter().group === 'all'">All</option>
             @for (group of groups(); track group.id) {
-              <option [value]="group.id" [selected]="filter().group === group.id">{{ group.name }}</option>
+              <option [value]="group.id" [selected]="filter().group === group.id">
+                {{ group.name }}
+              </option>
             }
           </select>
         </div>
@@ -94,7 +110,9 @@ import {
         </div>
       } @else {
         @if (error()) {
-          <p class="banner" role="alert">Could not refresh: {{ error() }} Showing the last known data.</p>
+          <p class="banner warn" role="alert">
+            Could not refresh: {{ error() }} Showing the last known data.
+          </p>
         }
         <div class="table-wrap">
           <table>
@@ -118,14 +136,18 @@ import {
                     <span class="sub">{{ subtitle(device) }}</span>
                   </th>
                   <td>
-                    <span class="status" [class.online]="device.is_online">
-                      <span class="dot" aria-hidden="true"></span>{{ device.is_online ? 'Online' : 'Offline' }}
-                    </span>
+                    <app-status-indicator [online]="device.is_online" />
                   </td>
                   <td class="col-type">{{ typeLabels[device.device_type] }}</td>
-                  <td><span class="pill" [class]="'trust-' + device.trust_level">{{ device.trust_level }}</span></td>
+                  <td>
+                    <span class="pill" [class]="'trust-' + device.trust_level">{{
+                      device.trust_level
+                    }}</span>
+                  </td>
                   <td class="col-group">{{ device.group.name }}</td>
-                  <td class="col-seen" [title]="device.last_seen">{{ ago(device.last_seen) }}</td>
+                  <td class="col-seen" [title]="device.last_seen">
+                    {{ device.last_seen | timeAgo }}
+                  </td>
                   <td class="col-ip">{{ address(device) }}</td>
                 </tr>
               }
@@ -136,37 +158,107 @@ import {
     </section>
   `,
   styles: `
-    .page-head { display: flex; align-items: baseline; gap: 1rem; }
-    .page-head h1 { margin: 0; font-size: 1.6rem; }
-    .filters { display: flex; flex-wrap: wrap; gap: 0.8rem; margin: 1rem 0; align-items: end; }
-    .field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 8rem; }
-    .field.grow { flex: 1 1 14rem; }
-    .field label { margin: 0; }
-    select { padding: 0.7rem 0.6rem; border: 1px solid var(--border); border-radius: 0.5rem;
-             background: var(--bg-input); color: inherit; font: inherit; }
-    .state { padding: 2rem; text-align: center; border: 1px dashed var(--border); border-radius: 0.8rem; }
-    .state button { margin-top: 0.5rem; }
-    .banner { padding: 0.6rem 0.9rem; border: 1px solid var(--warn); border-radius: 0.5rem; color: var(--warn); }
-    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 0.8rem; background: var(--bg-card); }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
-    tbody tr:last-child > * { border-bottom: 0; }
-    thead th { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
-    button.sort { margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit;
-                  font-weight: 600; cursor: pointer; }
-    button.sort span { margin-left: 0.3rem; }
-    th.name { font-weight: 400; white-space: normal; }
-    th.name a { color: var(--text); font-weight: 600; }
-    .sub { display: block; font-size: 0.8rem; color: var(--muted); }
-    .status { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); }
-    .status.online { color: var(--accent); }
-    .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: currentColor; }
-    code { font-size: 0.85em; }
+    .page-head {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+    }
+    .page-head h1 {
+      margin: 0;
+      font-size: 1.6rem;
+    }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+      margin: 1rem 0;
+      align-items: end;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      min-width: 8rem;
+    }
+    .field.grow {
+      flex: 1 1 14rem;
+    }
+    .field label {
+      margin: 0;
+    }
+    select {
+      padding: 0.7rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      background: var(--bg-input);
+      color: inherit;
+      font: inherit;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 0.8rem;
+      background: var(--bg-card);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th,
+    td {
+      padding: 0.7rem 0.9rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    tbody tr:last-child > * {
+      border-bottom: 0;
+    }
+    thead th {
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    button.sort {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: inherit;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.sort span {
+      margin-left: 0.3rem;
+    }
+    th.name {
+      font-weight: 400;
+      white-space: normal;
+    }
+    th.name a {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .sub {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    code {
+      font-size: 0.85em;
+    }
     @media (max-width: 900px) {
-      .col-ip, .col-seen { display: none; }
+      .col-ip,
+      .col-seen {
+        display: none;
+      }
     }
     @media (max-width: 640px) {
-      .col-group, .col-type { display: none; }
+      .col-group,
+      .col-type {
+        display: none;
+      }
     }
   `,
 })
@@ -197,17 +289,19 @@ export class DeviceList {
   });
 
   protected readonly shown = computed(() =>
-    sortDevices(filterDevices(this.devices(), this.filter()), this.sort().key, this.sort().direction),
+    sortDevices(
+      filterDevices(this.devices(), this.filter()),
+      this.sort().key,
+      this.sort().direction,
+    ),
   );
 
   private readonly reloads = new Subject<void>();
 
   constructor() {
-    const ticks$ = this.pollMs > 0 ? timer(0, this.pollMs) : timer(0);
-
     // Polls on a timer; "Retry" triggers an immediate load. switchMap drops a
     // slow response when a newer request has started.
-    merge(ticks$, this.reloads)
+    merge(poll(this.pollMs), this.reloads)
       .pipe(
         switchMap(() =>
           forkJoin({
@@ -303,9 +397,5 @@ export class DeviceList {
     );
     const extra = sorted.length - 1;
     return extra > 0 ? `${sorted[0].ip_address} +${extra}` : sorted[0].ip_address;
-  }
-
-  protected ago(iso: string): string {
-    return timeAgo(iso);
   }
 }

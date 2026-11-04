@@ -1,3 +1,9 @@
+/**
+ * Devices as `GET /api/devices` returns them. Field names follow the API's
+ * JSON (snake_case) so responses need no mapping.
+ */
+import { GroupRef } from './group.models';
+
 export const TRUST_LEVELS = ['trusted', 'normal', 'restricted', 'unknown', 'suspicious'] as const;
 export type TrustLevel = (typeof TRUST_LEVELS)[number];
 
@@ -65,11 +71,6 @@ export interface DeviceAddress {
   last_seen: string;
 }
 
-export interface GroupRef {
-  id: number;
-  name: string;
-}
-
 export interface Device {
   id: number;
   /** Name derived by discovery (the MAC until a source names the device). */
@@ -100,17 +101,6 @@ export interface Device {
   addresses: DeviceAddress[];
   /** Every source's latest answer, preferred source first. */
   names: DeviceName[];
-}
-
-export interface Group {
-  id: number;
-  slug: string | null;
-  name: string;
-  description: string;
-  is_system: boolean;
-  defaults: Record<string, unknown>;
-  device_count: number;
-  created_at: string;
 }
 
 /** Fields a user may change; an omitted field stays as it is. */

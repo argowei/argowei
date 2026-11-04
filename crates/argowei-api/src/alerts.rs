@@ -19,12 +19,40 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
+use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
-use crate::error::{db_error, ApiError};
+use crate::error::ApiError;
 use crate::state::AppState;
 
 pub const NEW_DEVICE: &str = "device.new";
+
+/// Where an alert is in its life cycle: open, then acknowledged (someone has
+/// seen it), then resolved (dealt with). Stored as its `as_str` text, which the
+/// `alerts_status_valid` constraint limits to these three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertStatus {
+    Open,
+    Acknowledged,
+    Resolved,
+}
+
+impl AlertStatus {
+    pub const ALL: [AlertStatus; 3] = [Self::Open, Self::Acknowledged, Self::Resolved];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Acknowledged => "acknowledged",
+            Self::Resolved => "resolved",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|status| status.as_str() == value)
+    }
+}
 const BASELINE_WINDOW_KEY: &str = "baseline_window_secs";
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
@@ -292,26 +320,32 @@ struct ListResponse {
     next_before: Option<i64>,
 }
 
-fn statuses(filter: Option<&str>) -> Result<Vec<&'static str>, ApiError> {
-    Ok(match filter.unwrap_or("active") {
-        "active" => vec!["open", "acknowledged"],
-        "open" => vec!["open"],
-        "acknowledged" => vec!["acknowledged"],
-        "resolved" => vec!["resolved"],
-        "all" => vec!["open", "acknowledged", "resolved"],
-        _ => {
-            return Err(ApiError::BadRequest(
-                "status must be active, open, acknowledged, resolved or all".into(),
-            ))
-        }
-    })
+/// The statuses a list filter stands for: one status by name, `active` for
+/// everything not yet resolved, or `all`.
+fn statuses(filter: Option<&str>) -> Result<Vec<AlertStatus>, ApiError> {
+    use AlertStatus::{Acknowledged, Open};
+
+    match filter.unwrap_or("active") {
+        "active" => Ok(vec![Open, Acknowledged]),
+        "all" => Ok(AlertStatus::ALL.to_vec()),
+        name => AlertStatus::parse(name)
+            .map(|status| vec![status])
+            .ok_or_else(|| {
+                ApiError::BadRequest(
+                    "status must be active, open, acknowledged, resolved or all".into(),
+                )
+            }),
+    }
 }
 
 async fn list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<ListResponse>, ApiError> {
-    let statuses = statuses(query.status.as_deref())?;
+    let statuses: Vec<&str> = statuses(query.status.as_deref())?
+        .into_iter()
+        .map(AlertStatus::as_str)
+        .collect();
     let limit = query
         .limit
         .unwrap_or(DEFAULT_PAGE_SIZE)
@@ -325,8 +359,7 @@ async fn list(
     .bind(query.before)
     .bind(limit + 1)
     .fetch_all(&state.db)
-    .await
-    .map_err(db_error)?;
+    .await?;
 
     let next_before = if rows.len() as i64 > limit {
         rows.truncate(limit as usize);
@@ -350,18 +383,18 @@ struct StatusResponse {
 
 async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, ApiError> {
     let (open, acknowledged): (i64, i64) = sqlx::query_as(
-        "SELECT count(*) FILTER (WHERE status = 'open'), \
-                count(*) FILTER (WHERE status = 'acknowledged') FROM alerts",
+        "SELECT count(*) FILTER (WHERE status = $1), \
+                count(*) FILTER (WHERE status = $2) FROM alerts",
     )
+    .bind(AlertStatus::Open.as_str())
+    .bind(AlertStatus::Acknowledged.as_str())
     .fetch_one(&state.db)
-    .await
-    .map_err(db_error)?;
+    .await?;
 
     let started: Vec<DateTime<Utc>> = sqlx::query_scalar("SELECT started_at FROM baselines")
         .fetch_all(&state.db)
-        .await
-        .map_err(db_error)?;
-    let window = baseline_window(&state.db).await.map_err(db_error)?;
+        .await?;
+    let window = baseline_window(&state.db).await?;
 
     Ok(Json(StatusResponse {
         open,
@@ -370,10 +403,49 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, A
     }))
 }
 
-#[derive(Clone, Copy)]
+/// A step a user takes on an alert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Transition {
     Acknowledge,
     Resolve,
+}
+
+impl Transition {
+    /// The audit log action for this step.
+    fn action(self) -> &'static str {
+        match self {
+            Transition::Acknowledge => "alert.acknowledge",
+            Transition::Resolve => "alert.resolve",
+        }
+    }
+}
+
+/// Where `step` takes an alert that is `current`.
+///
+/// `Ok(Some(next))` moves it on; `Ok(None)` means it is already there, so a
+/// repeated click is a harmless no-op; going back (acknowledging a resolved
+/// alert) is refused. An open alert may be resolved directly.
+fn next_status(step: Transition, current: AlertStatus) -> Result<Option<AlertStatus>, ApiError> {
+    use AlertStatus::{Acknowledged, Open, Resolved};
+
+    match (step, current) {
+        (Transition::Acknowledge, Open) => Ok(Some(Acknowledged)),
+        (Transition::Acknowledge, Acknowledged) => Ok(None),
+        (Transition::Acknowledge, Resolved) => {
+            Err(ApiError::Conflict("the alert is already resolved"))
+        }
+        (Transition::Resolve, Resolved) => Ok(None),
+        (Transition::Resolve, Open | Acknowledged) => Ok(Some(Resolved)),
+    }
+}
+
+/// The columns a transition needs, read under a row lock so two clicks at once
+/// cannot both move (and both audit) the same alert.
+#[derive(sqlx::FromRow)]
+struct LockedAlert {
+    status: String,
+    r#type: String,
+    device_id: Option<i32>,
 }
 
 async fn acknowledge(
@@ -403,62 +475,68 @@ async fn transition(
     Path(id): Path<i64>,
     step: Transition,
 ) -> Result<Response, ApiError> {
-    let mut tx = state.db.begin().await.map_err(db_error)?;
-    let (current, kind, device_id): (String, String, Option<i32>) =
+    // Lock the alert so two concurrent clicks cannot both see it open and
+    // both record the transition.
+    let mut tx = state.db.begin().await?;
+    let alert: LockedAlert =
         sqlx::query_as("SELECT status, type, device_id FROM alerts WHERE id = $1 FOR UPDATE")
             .bind(id)
             .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_error)?
+            .await?
             .ok_or(ApiError::NotFound("no such alert"))?;
+    let current = AlertStatus::parse(&alert.status).ok_or_else(|| {
+        tracing::error!(status = %alert.status, "alert with an unknown status");
+        ApiError::Unavailable
+    })?;
 
-    let (action, new_status) = match (step, current.as_str()) {
-        (Transition::Acknowledge, "open") => ("alert.acknowledge", Some("acknowledged")),
-        (Transition::Acknowledge, "acknowledged") => ("alert.acknowledge", None),
-        (Transition::Acknowledge, _) => {
-            return Err(ApiError::Conflict("the alert is already resolved"))
-        }
-        (Transition::Resolve, "resolved") => ("alert.resolve", None),
-        (Transition::Resolve, _) => ("alert.resolve", Some("resolved")),
-    };
-
-    let changed = new_status.is_some();
-    if let Some(new_status) = new_status {
-        let sql = if new_status == "acknowledged" {
-            "UPDATE alerts SET status = 'acknowledged', acknowledged_at = now(), \
-                 acknowledged_by = $2 WHERE id = $1"
-        } else {
-            "UPDATE alerts SET status = 'resolved', resolved_at = now(), \
-                 resolved_by = $2 WHERE id = $1"
+    let next = next_status(step, current)?;
+    let changed = next.is_some();
+    if let Some(next) = next {
+        // Each step also records who took it and when.
+        let sql = match step {
+            Transition::Acknowledge => {
+                "UPDATE alerts SET status = $3, acknowledged_at = now(), acknowledged_by = $2 \
+                 WHERE id = $1"
+            }
+            Transition::Resolve => {
+                "UPDATE alerts SET status = $3, resolved_at = now(), resolved_by = $2 \
+                 WHERE id = $1"
+            }
         };
         sqlx::query(sql)
             .bind(id)
             .bind(&user.username)
+            .bind(next.as_str())
             .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
+            .await?;
         audit::record(
             &mut *tx,
-            AuditEntry::new(&user.username, action, Outcome::Success)
+            AuditEntry::new(&user.username, step.action(), Outcome::Success)
                 .target("alert", id)
                 .remote_addr(meta.remote_addr)
-                .payload(json!({ "type": kind, "device_id": device_id, "from": current })),
+                .payload(json!({
+                    "type": alert.r#type,
+                    "device_id": alert.device_id,
+                    "from": current.as_str(),
+                })),
         )
-        .await
-        .map_err(db_error)?;
+        .await?;
     }
-    tx.commit().await.map_err(db_error)?;
+    tx.commit().await?;
 
     let row: AlertRow = sqlx::query_as(&format!("{SELECT_ALERTS} WHERE a.id = $1"))
         .bind(id)
         .fetch_one(&state.db)
-        .await
-        .map_err(db_error)?;
+        .await?;
 
-    let mut response = (StatusCode::OK, Json(Alert::from(row))).into_response();
-    if changed {
-        response.extensions_mut().insert(Audited);
-    }
+    let response = (StatusCode::OK, Json(Alert::from(row))).into_response();
+    let response = if changed {
+        // Audited above; a request that changed nothing is left to the
+        // middleware's generic entry.
+        mark_audited(response)
+    } else {
+        response
+    };
     Ok(response)
 }
 
@@ -545,9 +623,47 @@ mod tests {
     }
 
     #[test]
+    fn alert_statuses_round_trip_through_text() {
+        for status in AlertStatus::ALL {
+            assert_eq!(AlertStatus::parse(status.as_str()), Some(status));
+        }
+        assert_eq!(AlertStatus::parse("Open"), None);
+        assert_eq!(AlertStatus::parse("active"), None, "a filter, not a status");
+    }
+
+    #[test]
+    fn each_step_moves_an_alert_forward_repeats_are_no_ops_and_going_back_is_refused() {
+        use AlertStatus::{Acknowledged, Open, Resolved};
+        use Transition::{Acknowledge, Resolve};
+
+        assert_eq!(next_status(Acknowledge, Open).unwrap(), Some(Acknowledged));
+        assert_eq!(next_status(Acknowledge, Acknowledged).unwrap(), None);
+        assert!(matches!(
+            next_status(Acknowledge, Resolved),
+            Err(ApiError::Conflict(_))
+        ));
+        assert_eq!(
+            next_status(Resolve, Open).unwrap(),
+            Some(Resolved),
+            "directly"
+        );
+        assert_eq!(next_status(Resolve, Acknowledged).unwrap(), Some(Resolved));
+        assert_eq!(next_status(Resolve, Resolved).unwrap(), None);
+    }
+
+    #[test]
+    fn steps_are_audited_under_their_own_action() {
+        assert_eq!(Transition::Acknowledge.action(), "alert.acknowledge");
+        assert_eq!(Transition::Resolve.action(), "alert.resolve");
+    }
+
+    #[test]
     fn status_filters_map_to_alert_states() {
-        assert_eq!(statuses(None).unwrap(), ["open", "acknowledged"]);
-        assert_eq!(statuses(Some("resolved")).unwrap(), ["resolved"]);
+        use AlertStatus::{Acknowledged, Open, Resolved};
+
+        assert_eq!(statuses(None).unwrap(), [Open, Acknowledged]);
+        assert_eq!(statuses(Some("resolved")).unwrap(), [Resolved]);
+        assert_eq!(statuses(Some("open")).unwrap(), [Open]);
         assert_eq!(statuses(Some("all")).unwrap().len(), 3);
         assert!(statuses(Some("bogus")).is_err());
     }

@@ -1,11 +1,16 @@
+//! Local network interfaces, as listed by `argowei interfaces`.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetworkInterface {
+    /// Kernel name, e.g. `eth0`.
     pub name: String,
     pub kind: NetworkInterfaceKind,
+    /// From `/sys/class/net/<name>/address`; `None` when it is missing or empty.
     pub mac_address: Option<String>,
+    /// The kernel's `operstate` (`up`, `down`, `unknown`, ...).
     pub oper_state: Option<String>,
 }
 

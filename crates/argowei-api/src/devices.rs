@@ -1,3 +1,8 @@
+//! `GET /api/devices`, `GET /api/devices/{id}` and `PATCH /api/devices/{id}`:
+//! the device inventory and the fields a user may edit (label, notes, group,
+//! trust level, type override). Every edit is audited with the old and new
+//! values.
+
 use argowei_core::device::{
     AddressSource, Device, DeviceAddress, IpProtocol, TrustLevel, TypeSource,
 };
@@ -5,7 +10,6 @@ use argowei_core::device_type::{Classification, DeviceType};
 use argowei_core::names::NameSource;
 use argowei_core::oui;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Json, Router};
@@ -15,10 +19,11 @@ use serde_json::{json, Value};
 use sqlx::postgres::PgRow;
 use sqlx::{FromRow, PgPool, Row};
 
-use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
+use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
-use crate::error::{db_error, is_foreign_key_violation, ApiError};
+use crate::error::{is_foreign_key_violation, ApiError};
 use crate::state::AppState;
+use crate::validate;
 
 const MAX_LABEL_CHARS: usize = 64;
 const MAX_NOTES_CHARS: usize = 2000;
@@ -194,11 +199,8 @@ pub fn router() -> Router<AppState> {
 
 async fn list_devices(
     State(state): State<AppState>,
-) -> Result<Json<Vec<DeviceWithAddresses>>, StatusCode> {
-    list_with_addresses(&state.db, None)
-        .await
-        .map(Json)
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
+) -> Result<Json<Vec<DeviceWithAddresses>>, ApiError> {
+    Ok(Json(list_with_addresses(&state.db, None).await?))
 }
 
 async fn get_device(
@@ -206,8 +208,7 @@ async fn get_device(
     Path(id): Path<i32>,
 ) -> Result<Json<DeviceWithAddresses>, ApiError> {
     list_with_addresses(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .map(Json)
@@ -328,46 +329,30 @@ where
     Option::<T>::deserialize(d).map(Some)
 }
 
-/// Trims; a blank label means "no label". Single line, no control characters.
+/// A blank label means "no label", so the discovered name shows again.
 fn normalize_label(raw: &str) -> Result<Option<String>, ApiError> {
-    let label = raw.trim();
-    if label.is_empty() {
-        return Ok(None);
-    }
-    if label.chars().count() > MAX_LABEL_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "label must be at most {MAX_LABEL_CHARS} characters"
-        )));
-    }
-    if label.chars().any(char::is_control) {
-        return Err(ApiError::BadRequest(
-            "label must be a single line without control characters".into(),
-        ));
-    }
-    Ok(Some(label.to_owned()))
+    let label = validate::single_line(raw, "label", 0..=MAX_LABEL_CHARS)?;
+    Ok((!label.is_empty()).then_some(label))
 }
 
-/// Trims; may span several lines, but no other control characters.
 fn normalize_notes(raw: &str) -> Result<String, ApiError> {
-    let notes = raw.trim();
-    if notes.chars().count() > MAX_NOTES_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "notes must be at most {MAX_NOTES_CHARS} characters"
-        )));
-    }
-    if notes
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-    {
-        return Err(ApiError::BadRequest(
-            "notes must not contain control characters".into(),
-        ));
-    }
-    Ok(notes.to_owned())
+    validate::multi_line(raw, "notes", 0..=MAX_NOTES_CHARS)
 }
 
 fn excerpt(text: &str) -> String {
     text.chars().take(AUDIT_EXCERPT_CHARS).collect()
+}
+
+/// What a user can change about a device, read under a row lock: two edits at
+/// once are applied one after the other, and each is audited against the values
+/// it really replaced.
+#[derive(sqlx::FromRow)]
+struct EditableDevice {
+    label: Option<String>,
+    notes: String,
+    group_id: i32,
+    trust_level: String,
+    type_override: Option<String>,
 }
 
 async fn update_device(
@@ -383,21 +368,23 @@ async fn update_device(
         .transpose()?;
     let new_notes = body.notes.as_deref().map(normalize_notes).transpose()?;
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
-    let (old_label, old_notes, old_group, old_trust, old_type): (
-        Option<String>,
-        String,
-        i32,
-        String,
-        Option<String>,
-    ) = sqlx::query_as(
+    // The row stays locked until commit: the values read here are what the
+    // audit entry reports as "before", so no concurrent edit may land between
+    // this read and the update.
+    let mut tx = state.db.begin().await?;
+    let EditableDevice {
+        label: old_label,
+        notes: old_notes,
+        group_id: old_group,
+        trust_level: old_trust,
+        type_override: old_type,
+    } = sqlx::query_as(
         "SELECT label, notes, group_id, trust_level, type_override \
          FROM devices WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?
+    .await?
     .ok_or(ApiError::NotFound("no such device"))?;
     let old_trust = TrustLevel::parse(&old_trust).ok_or(ApiError::Unavailable)?;
     let old_type = old_type
@@ -453,7 +440,7 @@ async fn update_device(
             if is_foreign_key_violation(&error) {
                 ApiError::BadRequest("no such group".into())
             } else {
-                db_error(error)
+                ApiError::from(error)
             }
         })?;
 
@@ -463,8 +450,7 @@ async fn update_device(
                 sqlx::query_as("SELECT id, name FROM device_groups WHERE id = ANY($1)")
                     .bind(vec![old_group, group])
                     .fetch_all(&mut *tx)
-                    .await
-                    .map_err(db_error)?;
+                    .await?;
             let describe = |group: i32| {
                 let name = names
                     .iter()
@@ -485,28 +471,30 @@ async fn update_device(
                 .remote_addr(meta.remote_addr)
                 .payload(json!({ "changes": Value::Object(changes) })),
         )
-        .await
-        .map_err(db_error)?;
+        .await?;
     }
-    tx.commit().await.map_err(db_error)?;
+    tx.commit().await?;
 
     let device = list_with_addresses(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .ok_or(ApiError::NotFound("no such device"))?;
 
-    let mut response = Json(device).into_response();
-    if changed {
-        // Written to the audit log above; skip the generic fallback entry.
-        response.extensions_mut().insert(Audited);
-    }
+    let response = Json(device).into_response();
+    let response = if changed {
+        // Audited above; a request that changed nothing is left to the
+        // middleware's generic entry.
+        mark_audited(response)
+    } else {
+        response
+    };
     Ok(response)
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::validate::bad_request;
     use chrono::Utc;
 
     use super::*;
@@ -526,13 +514,6 @@ mod tests {
             is_online: true,
             first_seen: Utc::now(),
             last_seen: Utc::now(),
-        }
-    }
-
-    fn bad_request(result: Result<impl std::fmt::Debug, ApiError>) -> String {
-        match result {
-            Err(ApiError::BadRequest(message)) => message,
-            other => panic!("expected a validation error, got {other:?}"),
         }
     }
 

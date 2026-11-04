@@ -1,17 +1,31 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, TestRequest } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
 
 import { ALERT_POLL_MS } from '../../core/alerts.service';
 import { Alert, AlertPage, AlertsStatus, SuggestedAction } from '../../core/alerts.models';
 import { AlertList } from './alert-list';
+import { providePageTesting } from '../../testing';
 
 const ACTIONS: SuggestedAction[] = [
   { action: 'trust', label: 'Trust', available: true, effect: 'Sets the trust level to trusted.' },
-  { action: 'restrict', label: 'Restrict', available: true, effect: 'Sets the trust level to restricted.' },
-  { action: 'block', label: 'Block', available: false, reason: 'Needs gateway or router integration, which is not set up yet.' },
-  { action: 'quarantine', label: 'Quarantine', available: false, reason: 'Needs gateway or router integration, which is not set up yet.' },
+  {
+    action: 'restrict',
+    label: 'Restrict',
+    available: true,
+    effect: 'Sets the trust level to restricted.',
+  },
+  {
+    action: 'block',
+    label: 'Block',
+    available: false,
+    reason: 'Needs gateway or router integration, which is not set up yet.',
+  },
+  {
+    action: 'quarantine',
+    label: 'Quarantine',
+    available: false,
+    reason: 'Needs gateway or router integration, which is not set up yet.',
+  },
 ];
 
 function alert(overrides: Partial<Alert> = {}): Alert {
@@ -25,15 +39,32 @@ function alert(overrides: Partial<Alert> = {}): Alert {
     acknowledged_by: null,
     resolved_at: null,
     resolved_by: null,
-    device: { id: 12, display_name: '00:80:77:aa:bb:01', mac_address: '00:80:77:aa:bb:01', vendor: 'Brother industries, LTD.' },
-    payload: { mac: '00:80:77:aa:bb:01', vendor: 'Brother industries, LTD.', interface: 'eth0', ip: '192.168.1.20', suggested_actions: ACTIONS },
+    device: {
+      id: 12,
+      display_name: '00:80:77:aa:bb:01',
+      mac_address: '00:80:77:aa:bb:01',
+      vendor: 'Brother industries, LTD.',
+    },
+    payload: {
+      mac: '00:80:77:aa:bb:01',
+      vendor: 'Brother industries, LTD.',
+      interface: 'eth0',
+      ip: '192.168.1.20',
+      suggested_actions: ACTIONS,
+    },
     ...overrides,
   };
 }
 
-const page = (items: Alert[], next_before: number | null = null): AlertPage => ({ items, next_before });
+const page = (items: Alert[], next_before: number | null = null): AlertPage => ({
+  items,
+  next_before,
+});
 
-const status = (overrides: Partial<AlertsStatus['baseline']> = {}, counts = { open: 1, acknowledged: 0 }): AlertsStatus => ({
+const status = (
+  overrides: Partial<AlertsStatus['baseline']> = {},
+  counts = { open: 1, acknowledged: 0 },
+): AlertsStatus => ({
   ...counts,
   baseline: { state: 'done', window_secs: 0, ends_at: null, ...overrides },
 });
@@ -49,12 +80,7 @@ describe('AlertList', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideRouter([]),
-        { provide: ALERT_POLL_MS, useValue: 0 },
-      ],
+      providers: [...providePageTesting(), { provide: ALERT_POLL_MS, useValue: 0 }],
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -62,9 +88,17 @@ describe('AlertList', () => {
   afterEach(() => http.verify());
 
   const list = (view: string, before?: number) =>
-    http.expectOne((r) => r.url === '/api/alerts' && r.params.get('status') === view && r.params.get('before') === (before?.toString() ?? null));
+    http.expectOne(
+      (r) =>
+        r.url === '/api/alerts' &&
+        r.params.get('status') === view &&
+        r.params.get('before') === (before?.toString() ?? null),
+    );
 
-  function render(first: AlertPage | 'error' = page([alert()]), baseline: AlertsStatus = status()): Rendered {
+  function render(
+    first: AlertPage | 'error' = page([alert()]),
+    baseline: AlertsStatus = status(),
+  ): Rendered {
     const fixture = TestBed.createComponent(AlertList);
     fixture.detectChanges();
 
@@ -79,13 +113,17 @@ describe('AlertList', () => {
     return { fixture, http, el: fixture.nativeElement as HTMLElement };
   }
 
-  const buttons = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLButtonElement>('.alert button'));
-  const button = (el: HTMLElement, label: string) => buttons(el).find((b) => b.textContent?.trim() === label)!;
+  const buttons = (el: HTMLElement) =>
+    Array.from(el.querySelectorAll<HTMLButtonElement>('.alert button'));
+  const button = (el: HTMLElement, label: string) =>
+    buttons(el).find((b) => b.textContent?.trim() === label)!;
 
   /** After an action the page reloads the list and the counts. */
   function flushReload(r: Rendered, items: Alert[] = []): void {
     list('active').flush(page(items));
-    r.http.expectOne('/api/alerts/status').flush(status({}, { open: items.length, acknowledged: 0 }));
+    r.http
+      .expectOne('/api/alerts/status')
+      .flush(status({}, { open: items.length, acknowledged: 0 }));
     r.fixture.detectChanges();
   }
 
@@ -162,7 +200,13 @@ describe('AlertList', () => {
 
     it('says so while the network is being learned, and until when', () => {
       const ends = new Date(Date.now() + 3_600_000).toISOString();
-      const { el } = render(page([]), status({ state: 'learning', window_secs: 7200, ends_at: ends }, { open: 0, acknowledged: 0 }));
+      const { el } = render(
+        page([]),
+        status(
+          { state: 'learning', window_secs: 7200, ends_at: ends },
+          { open: 0, acknowledged: 0 },
+        ),
+      );
 
       const banner = el.querySelector('.banner.info')!;
       expect(banner.textContent).toContain('Learning your network');
@@ -232,7 +276,9 @@ describe('AlertList', () => {
       const r = render();
 
       button(r.el, 'Trust').click();
-      r.http.expectOne('/api/devices/12').flush({ error: 'no such device' }, { status: 404, statusText: 'Not Found' });
+      r.http
+        .expectOne('/api/devices/12')
+        .flush({ error: 'no such device' }, { status: 404, statusText: 'Not Found' });
       r.fixture.detectChanges();
 
       expect(r.el.querySelector('.alert .error')!.textContent).toContain('no longer exists');
@@ -255,7 +301,9 @@ describe('AlertList', () => {
     it('switches to resolved alerts, which have no actions', () => {
       const r = render();
 
-      Array.from(r.el.querySelectorAll<HTMLButtonElement>('.view')).find((b) => b.textContent?.includes('Resolved'))!.click();
+      Array.from(r.el.querySelectorAll<HTMLButtonElement>('.view'))
+        .find((b) => b.textContent?.includes('Resolved'))!
+        .click();
       r.fixture.detectChanges();
       list('resolved').flush(page([alert({ id: 3, status: 'resolved', resolved_by: 'admin' })]));
       r.fixture.detectChanges();

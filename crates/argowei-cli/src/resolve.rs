@@ -1,3 +1,5 @@
+//! `argowei resolve`: what each name source says about the given addresses.
+
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -6,8 +8,11 @@ use std::time::Duration;
 
 use argowei_collector::names::{
     resolve_all, DhcpLeaseResolver, HostnameResolver, MdnsResolver, NameSource, NetbiosResolver,
-    RdnsResolver, Target,
+    RdnsResolver, Target, DNS_PORT,
 };
+
+/// Lookups running at once; a handful of addresses rarely needs more.
+const MAX_CONCURRENCY: usize = 8;
 
 pub struct Options {
     pub addresses: Vec<Ipv4Addr>,
@@ -20,7 +25,7 @@ pub struct Options {
 /// answered, so disagreements and silent sources are visible.
 pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     let rdns = match options.dns_server {
-        Some(ip) => RdnsResolver::new(vec![SocketAddr::new(ip.into(), 53)]),
+        Some(ip) => RdnsResolver::new(vec![SocketAddr::new(ip.into(), DNS_PORT)]),
         None => RdnsResolver::from_system(),
     };
     println!(
@@ -48,14 +53,11 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     let targets: Vec<Target> = options
         .addresses
         .iter()
-        .map(|ip| Target {
-            ip: *ip,
-            mac: "00:00:00:00:00:00".to_owned(),
-        })
+        .map(|ip| Target::without_mac(*ip))
         .collect();
 
     println!("{:<16} {:<8} NAME", "ADDRESS", "SOURCE");
-    for result in resolve_all(&resolvers, &targets, options.timeout, 8) {
+    for result in resolve_all(&resolvers, &targets, options.timeout, MAX_CONCURRENCY) {
         for source in NameSource::ALL {
             let answer = result.names.iter().find(|n| n.source == source);
             let failure = result.errors.iter().find(|(s, _)| *s == source);

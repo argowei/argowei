@@ -23,9 +23,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub use argowei_core::names::NameSource;
 pub use dhcp::{parse_leases, DhcpLeaseResolver, Lease};
 pub use dns::DnsError;
-pub use mdns::MdnsResolver;
-pub use netbios::NetbiosResolver;
-pub use rdns::{local_nameservers, search_domains, RdnsResolver};
+pub use mdns::{MdnsResolver, MDNS_PORT};
+pub use netbios::{NetbiosResolver, NETBIOS_PORT};
+pub use rdns::{local_nameservers, search_domains, RdnsResolver, DNS_PORT};
 
 /// Largest DNS or NetBIOS datagram worth reading; replies are far smaller.
 const MAX_DATAGRAM: usize = 1500;
@@ -34,14 +34,32 @@ const MAX_DATAGRAM: usize = 1500;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     pub ip: Ipv4Addr,
-    /// Lower case, colon separated.
+    /// Lower case, colon separated; empty when not known (see
+    /// [`Target::without_mac`]).
     pub mac: String,
 }
 
+impl Target {
+    /// A device known only by its address, e.g. one named on the command
+    /// line without a scan. Sources keyed by MAC (the DHCP leases) then
+    /// match by IP alone.
+    pub fn without_mac(ip: Ipv4Addr) -> Self {
+        Self {
+            ip,
+            mac: String::new(),
+        }
+    }
+}
+
+/// Why a lookup failed. "No name" is not an error: see
+/// [`HostnameResolver::resolve`].
 #[derive(Debug)]
 pub enum ResolveError {
+    /// A socket or file operation failed (e.g. an unreadable lease file).
     Io(io::Error),
+    /// A DNS or mDNS answer could not be parsed, or the server failed.
     Dns(DnsError),
+    /// A NetBIOS answer could not be parsed.
     Malformed(&'static str),
     /// Queries only go to the local network.
     NotLocal(Ipv4Addr),
@@ -61,7 +79,16 @@ impl fmt::Display for ResolveError {
     }
 }
 
-impl std::error::Error for ResolveError {}
+impl std::error::Error for ResolveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            // `Dns` displays its inner error as is; reporting it as the
+            // source too would print the message twice.
+            _ => None,
+        }
+    }
+}
 
 impl From<io::Error> for ResolveError {
     fn from(error: io::Error) -> Self {
@@ -77,6 +104,7 @@ impl From<DnsError> for ResolveError {
 
 /// One way of learning a device's name.
 pub trait HostnameResolver: Send + Sync {
+    /// The source every answer of this resolver is attributed to.
     fn source(&self) -> NameSource;
 
     /// `Ok(None)` means the source has no (usable) name for this device,
@@ -85,6 +113,8 @@ pub trait HostnameResolver: Send + Sync {
     fn resolve(&self, target: &Target, timeout: Duration) -> Result<Option<String>, ResolveError>;
 }
 
+/// A name one source gave for a target. Already cleaned up
+/// (`argowei_core::names::sanitize_name`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedName {
     pub source: NameSource,
@@ -95,6 +125,7 @@ pub struct ResolvedName {
 #[derive(Debug)]
 pub struct TargetNames {
     pub target: Target,
+    /// At most one per source, in resolver order.
     pub names: Vec<ResolvedName>,
     /// Resolvers whose lookup failed; informational, never fatal.
     pub errors: Vec<(NameSource, String)>,
@@ -233,267 +264,7 @@ fn udp_exchange(
 mod fixtures;
 
 #[cfg(test)]
-pub(crate) mod testing {
-    use std::net::UdpSocket;
-    use std::time::Duration;
-
-    use super::{dns, Target};
-
-    pub fn target(ip: &str) -> Target {
-        target_with_mac(ip, "aa:bb:cc:dd:ee:01")
-    }
-
-    pub fn target_with_mac(ip: &str, mac: &str) -> Target {
-        Target {
-            ip: ip.parse().unwrap(),
-            mac: mac.to_owned(),
-        }
-    }
-
-    /// A UDP "device" on loopback that reads one request and answers it with
-    /// whatever `handler` returns (`None` = stay silent). Returns its port.
-    pub fn answer_once(handler: impl FnOnce(&[u8]) -> Option<Vec<u8>> + Send + 'static) -> u16 {
-        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        let port = socket.local_addr().unwrap().port();
-
-        std::thread::spawn(move || {
-            let mut buffer = [0u8; 1500];
-            if let Ok((length, from)) = socket.recv_from(&mut buffer) {
-                if let Some(reply) = handler(&buffer[..length]) {
-                    let _ = socket.send_to(&reply, from);
-                }
-            }
-        });
-        port
-    }
-
-    /// A PTR response to `request`: it repeats the question, and the answer
-    /// points back at it, as DNS servers compress. `target_labels` is the
-    /// answer's target in label form.
-    pub fn ptr_response(request: &[u8], target_labels: &[u8]) -> Vec<u8> {
-        let mut packet = request[..2].to_vec(); // same id
-        packet.extend_from_slice(&[0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0]);
-        packet.extend_from_slice(&request[12..]); // the question
-        packet.extend_from_slice(&[0xc0, 0x0c, 0, dns::TYPE_PTR as u8, 0, 1, 0, 0, 0, 120]);
-        packet.extend_from_slice(&(target_labels.len() as u16).to_be_bytes());
-        packet.extend_from_slice(target_labels);
-        packet
-    }
-}
+pub(crate) mod testing;
 
 #[cfg(test)]
-mod tests {
-    use std::sync::atomic::AtomicUsize;
-
-    use super::testing::target;
-    use super::*;
-
-    /// Answers with a fixed result and records how it was used.
-    struct Fake {
-        source: NameSource,
-        result: fn(&Target) -> Result<Option<String>, ResolveError>,
-        delay: Duration,
-        running: Arc<AtomicUsize>,
-        peak: Arc<AtomicUsize>,
-    }
-
-    impl Fake {
-        fn new(
-            source: NameSource,
-            result: fn(&Target) -> Result<Option<String>, ResolveError>,
-        ) -> Self {
-            Self {
-                source,
-                result,
-                delay: Duration::ZERO,
-                running: Arc::default(),
-                peak: Arc::default(),
-            }
-        }
-    }
-
-    impl HostnameResolver for Fake {
-        fn source(&self) -> NameSource {
-            self.source
-        }
-
-        fn resolve(
-            &self,
-            target: &Target,
-            _timeout: Duration,
-        ) -> Result<Option<String>, ResolveError> {
-            let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
-            self.peak.fetch_max(now, Ordering::SeqCst);
-            std::thread::sleep(self.delay);
-            self.running.fetch_sub(1, Ordering::SeqCst);
-            (self.result)(target)
-        }
-    }
-
-    fn named(target: &Target) -> Result<Option<String>, ResolveError> {
-        Ok(Some(format!("host-{}", target.ip.octets()[3])))
-    }
-
-    fn failing(_: &Target) -> Result<Option<String>, ResolveError> {
-        Err(ResolveError::Malformed("boom"))
-    }
-
-    fn silent(_: &Target) -> Result<Option<String>, ResolveError> {
-        Ok(None)
-    }
-
-    fn crashing(_: &Target) -> Result<Option<String>, ResolveError> {
-        panic!("resolver bug")
-    }
-
-    fn targets(count: u8) -> Vec<Target> {
-        (1..=count)
-            .map(|n| target(&format!("192.168.1.{n}")))
-            .collect()
-    }
-
-    fn arc(fake: Fake) -> Arc<dyn HostnameResolver> {
-        Arc::new(fake)
-    }
-
-    #[test]
-    fn every_answer_keeps_the_source_it_came_from() {
-        let resolvers = [
-            arc(Fake::new(NameSource::Mdns, named)),
-            arc(Fake::new(NameSource::Rdns, named)),
-        ];
-
-        let result = resolve_all(&resolvers, &targets(1), Duration::from_secs(1), 4);
-
-        assert_eq!(
-            result[0].names,
-            [
-                ResolvedName {
-                    source: NameSource::Mdns,
-                    name: "host-1".into()
-                },
-                ResolvedName {
-                    source: NameSource::Rdns,
-                    name: "host-1".into()
-                },
-            ]
-        );
-        assert!(result[0].errors.is_empty());
-    }
-
-    #[test]
-    fn results_come_back_in_target_order() {
-        let resolvers = [arc(Fake::new(NameSource::Mdns, named))];
-
-        let result = resolve_all(&resolvers, &targets(20), Duration::from_secs(1), 8);
-
-        let order: Vec<_> = result.iter().map(|r| r.target.ip.octets()[3]).collect();
-        assert_eq!(order, (1..=20).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn a_failing_resolver_does_not_cost_the_others_their_answers() {
-        let resolvers = [
-            arc(Fake::new(NameSource::Dhcp, failing)),
-            arc(Fake::new(NameSource::Mdns, named)),
-            arc(Fake::new(NameSource::Netbios, silent)),
-        ];
-
-        let result = resolve_all(&resolvers, &targets(2), Duration::from_secs(1), 2);
-
-        assert_eq!(result.len(), 2);
-        for outcome in &result {
-            assert_eq!(outcome.names.len(), 1);
-            assert_eq!(outcome.names[0].source, NameSource::Mdns);
-            assert_eq!(outcome.errors.len(), 1);
-            assert_eq!(outcome.errors[0].0, NameSource::Dhcp);
-            assert!(outcome.errors[0].1.contains("boom"));
-        }
-    }
-
-    #[test]
-    fn a_resolver_that_panics_only_loses_its_own_answer() {
-        let resolvers = [
-            arc(Fake::new(NameSource::Mdns, crashing)),
-            arc(Fake::new(NameSource::Rdns, named)),
-        ];
-
-        let result = resolve_all(&resolvers, &targets(3), Duration::from_secs(1), 3);
-
-        assert_eq!(result.len(), 3, "every target still has a result");
-        assert!(result
-            .iter()
-            .all(|r| r.names.len() == 1 && r.names[0].source == NameSource::Rdns));
-        assert!(result.iter().all(|r| r.errors[0].1.contains("crashed")));
-    }
-
-    #[test]
-    fn no_more_queries_run_at_once_than_the_limit_allows() {
-        let mut slow = Fake::new(NameSource::Mdns, named);
-        slow.delay = Duration::from_millis(30);
-        let peak = Arc::clone(&slow.peak);
-        let resolvers = [arc(slow)];
-
-        let result = resolve_all(&resolvers, &targets(24), Duration::from_secs(1), 3);
-
-        assert_eq!(result.len(), 24);
-        assert!(
-            peak.load(Ordering::SeqCst) <= 3,
-            "peak {}",
-            peak.load(Ordering::SeqCst)
-        );
-        assert!(
-            peak.load(Ordering::SeqCst) >= 2,
-            "the limit should actually be used"
-        );
-    }
-
-    #[test]
-    fn a_limit_of_zero_still_makes_progress() {
-        let resolvers = [arc(Fake::new(NameSource::Mdns, named))];
-
-        assert_eq!(
-            resolve_all(&resolvers, &targets(3), Duration::from_secs(1), 0).len(),
-            3
-        );
-    }
-
-    #[test]
-    fn nothing_to_resolve_yields_nothing() {
-        let resolvers = [arc(Fake::new(NameSource::Mdns, named))];
-
-        assert!(resolve_all(&resolvers, &[], Duration::from_secs(1), 4).is_empty());
-        assert_eq!(
-            resolve_all(&[], &targets(2), Duration::from_secs(1), 4).len(),
-            2
-        );
-    }
-
-    #[test]
-    fn only_the_local_network_is_asked() {
-        for local in [
-            "10.1.2.3",
-            "172.16.0.9",
-            "192.168.1.1",
-            "169.254.1.1",
-            "127.0.0.1",
-        ] {
-            assert!(is_local(local.parse().unwrap()), "{local}");
-        }
-        for public in ["8.8.8.8", "1.1.1.1", "172.32.0.1", "100.64.0.1"] {
-            assert!(!is_local(public.parse().unwrap()), "{public}");
-        }
-    }
-
-    #[test]
-    fn a_real_resolver_refuses_a_public_address() {
-        let resolver = MdnsResolver::default();
-
-        let result = resolver.resolve(&target("8.8.8.8"), Duration::from_millis(100));
-
-        assert!(matches!(result, Err(ResolveError::NotLocal(_))));
-    }
-}
+mod tests;

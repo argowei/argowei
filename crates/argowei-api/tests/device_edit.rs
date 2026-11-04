@@ -2,10 +2,7 @@
 
 mod common;
 
-use std::time::Duration;
-
-use argowei_api::discovery::{record_scan, ObservedHost};
-use argowei_api::presence::PresencePolicy;
+use argowei_api::discovery::record_scan;
 use axum::http::{Method, StatusCode};
 use common::*;
 use serde_json::json;
@@ -15,35 +12,16 @@ const MAC: &str = "aa:bb:cc:00:00:01";
 
 /// An admin who is logged in and one device known to the system.
 async fn setup(pool: PgPool) -> (Harness, String, i32) {
-    let h = harness(pool).await;
-    setup_admin(&h).await;
-    let cookie = login(&h).await;
-    let id = sqlx::query_scalar(
-        "INSERT INTO devices (name, mac_address, is_online) VALUES ($1, $1, true) RETURNING id",
-    )
-    .bind(MAC)
-    .fetch_one(&h.pool)
-    .await
-    .unwrap();
+    let (h, cookie) = admin(pool).await;
+    let id = insert_device(&h.pool, MAC).await;
     (h, cookie, id)
-}
-
-async fn patch(h: &Harness, cookie: &str, id: i32, body: serde_json::Value) -> Reply {
-    send(
-        &h.app,
-        Method::PATCH,
-        &format!("/api/devices/{id}"),
-        Some(cookie),
-        Some(body),
-    )
-    .await
 }
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn label_and_notes_round_trip(pool: PgPool) {
     let (h, cookie, id) = setup(pool).await;
 
-    let reply = patch(
+    let reply = patch_device(
         &h,
         &cookie,
         id,
@@ -77,7 +55,7 @@ async fn a_device_without_a_label_shows_its_discovered_name(pool: PgPool) {
 async fn values_are_trimmed_and_blank_or_null_clears(pool: PgPool) {
     let (h, cookie, id) = setup(pool).await;
 
-    let trimmed = patch(
+    let trimmed = patch_device(
         &h,
         &cookie,
         id,
@@ -87,15 +65,15 @@ async fn values_are_trimmed_and_blank_or_null_clears(pool: PgPool) {
     assert_eq!(trimmed.body["label"], "Drucker");
     assert_eq!(trimmed.body["notes"], "hallo");
 
-    let blank = patch(&h, &cookie, id, json!({ "label": "   " })).await;
+    let blank = patch_device(&h, &cookie, id, json!({ "label": "   " })).await;
     assert!(blank.body["label"].is_null());
     assert_eq!(
         blank.body["notes"], "hallo",
         "an absent field is left alone"
     );
 
-    patch(&h, &cookie, id, json!({ "label": "Wieder da" })).await;
-    let null = patch(&h, &cookie, id, json!({ "label": null, "notes": "" })).await;
+    patch_device(&h, &cookie, id, json!({ "label": "Wieder da" })).await;
+    let null = patch_device(&h, &cookie, id, json!({ "label": null, "notes": "" })).await;
     assert!(null.body["label"].is_null());
     assert_eq!(null.body["notes"], "");
 }
@@ -103,7 +81,7 @@ async fn values_are_trimmed_and_blank_or_null_clears(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn invalid_input_is_rejected_and_changes_nothing(pool: PgPool) {
     let (h, cookie, id) = setup(pool).await;
-    patch(&h, &cookie, id, json!({ "label": "Behalten" })).await;
+    patch_device(&h, &cookie, id, json!({ "label": "Behalten" })).await;
 
     for body in [
         json!({ "label": "x".repeat(65) }),
@@ -113,7 +91,7 @@ async fn invalid_input_is_rejected_and_changes_nothing(pool: PgPool) {
         json!({ "name": "renamed" }),
         json!({ "is_online": false }),
     ] {
-        let reply = patch(&h, &cookie, id, body.clone()).await;
+        let reply = patch_device(&h, &cookie, id, body.clone()).await;
         assert!(
             reply.status == StatusCode::BAD_REQUEST
                 || reply.status == StatusCode::UNPROCESSABLE_ENTITY,
@@ -131,7 +109,7 @@ async fn invalid_input_is_rejected_and_changes_nothing(pool: PgPool) {
 async fn an_unknown_device_is_not_found(pool: PgPool) {
     let (h, cookie, id) = setup(pool).await;
 
-    let reply = patch(&h, &cookie, id + 1000, json!({ "label": "x" })).await;
+    let reply = patch_device(&h, &cookie, id + 1000, json!({ "label": "x" })).await;
 
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
 }
@@ -161,8 +139,8 @@ async fn editing_requires_a_session(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn changes_are_audited_with_a_diff(pool: PgPool) {
     let (h, cookie, id) = setup(pool).await;
-    patch(&h, &cookie, id, json!({ "label": "Alt" })).await;
-    patch(&h, &cookie, id, json!({ "label": "Neu", "notes": "Notiz" })).await;
+    patch_device(&h, &cookie, id, json!({ "label": "Alt" })).await;
+    patch_device(&h, &cookie, id, json!({ "label": "Neu", "notes": "Notiz" })).await;
 
     let rows: Vec<(String, String, Option<String>, serde_json::Value)> = sqlx::query_as(
         "SELECT actor, action, target_id, payload FROM audit_log WHERE action = 'device.update' ORDER BY id",
@@ -187,9 +165,9 @@ async fn changes_are_audited_with_a_diff(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_request_that_changes_nothing_writes_no_change_entry(pool: PgPool) {
     let (h, cookie, id) = setup(pool).await;
-    patch(&h, &cookie, id, json!({ "label": "Gleich" })).await;
+    patch_device(&h, &cookie, id, json!({ "label": "Gleich" })).await;
 
-    let again = patch(&h, &cookie, id, json!({ "label": " Gleich " })).await;
+    let again = patch_device(&h, &cookie, id, json!({ "label": " Gleich " })).await;
 
     assert_eq!(again.status, StatusCode::OK);
     let updates: i64 =
@@ -203,7 +181,7 @@ async fn a_request_that_changes_nothing_writes_no_change_entry(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn discovery_never_overwrites_user_input(pool: PgPool) {
     let (h, cookie, id) = setup(pool).await;
-    patch(
+    patch_device(
         &h,
         &cookie,
         id,
@@ -211,17 +189,10 @@ async fn discovery_never_overwrites_user_input(pool: PgPool) {
     )
     .await;
 
-    let host = ObservedHost {
-        ip: "192.168.1.10".parse().unwrap(),
-        mac: MAC.to_owned(),
-    };
-    let policy = PresencePolicy {
-        offline_after_missed_scans: 3,
-        offline_after: Duration::from_secs(900),
-    };
+    let host = host(10, MAC);
     for minutes in [0, 5, 10] {
         let at = chrono::Utc::now() + chrono::Duration::minutes(minutes);
-        record_scan(&h.pool, "eth0", std::slice::from_ref(&host), at, &policy)
+        record_scan(&h.pool, "eth0", std::slice::from_ref(&host), at, &POLICY)
             .await
             .unwrap();
     }

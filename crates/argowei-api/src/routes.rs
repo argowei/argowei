@@ -1,3 +1,5 @@
+//! The HTTP app: which routes need a session, and the middleware order.
+
 use axum::extract::State;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::get;
@@ -28,8 +30,15 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(public)
         .merge(protected)
-        // Layers added later wrap earlier ones: the audit layer sees the
-        // outcome of authentication, and the origin check runs first.
+        // Layers added later wrap earlier ones, so a request passes
+        // check_origin -> audit_mutations -> require_auth -> handler:
+        // - the origin check runs first: a cross-origin write is refused
+        //   before anything else and is not audited (it is nobody's action,
+        //   and any web page could otherwise fill the audit log);
+        // - the audit layer wraps authentication, so requests denied there
+        //   (401) are recorded, attributed via the user extension that
+        //   require_auth puts on the response.
+        // Pinned by `middleware_runs_origin_check_then_audit_then_auth`.
         .layer(from_fn_with_state(state.clone(), audit::audit_mutations))
         .layer(from_fn(auth::check_origin))
         .with_state(state)
@@ -46,18 +55,18 @@ async fn root() -> Json<Value> {
 async fn health(State(state): State<AppState>) -> Json<Value> {
     let database_status = match sqlx::query("SELECT 1").execute(&state.db).await {
         Ok(_) => "ok",
-        Err(_) => "unavailable",
+        Err(error) => {
+            tracing::warn!(%error, "health check: database unavailable");
+            "unavailable"
+        }
     };
 
-    let redis_status = match state.redis.get_multiplexed_async_connection().await {
-        Ok(mut conn) => {
-            let pong: Result<String, _> = redis::cmd("PING").query_async(&mut conn).await;
-            match pong {
-                Ok(_) => "ok",
-                Err(_) => "unavailable",
-            }
+    let redis_status = match ping_redis(&state.redis).await {
+        Ok(()) => "ok",
+        Err(error) => {
+            tracing::warn!(%error, "health check: redis unavailable");
+            "unavailable"
         }
-        Err(_) => "unavailable",
     };
 
     Json(json!({
@@ -65,4 +74,12 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         "database": database_status,
         "redis": redis_status,
     }))
+}
+
+async fn ping_redis(client: &redis::Client) -> redis::RedisResult<()> {
+    let mut connection = client.get_multiplexed_async_connection().await?;
+    redis::cmd("PING")
+        .query_async::<String>(&mut connection)
+        .await?;
+    Ok(())
 }

@@ -12,8 +12,13 @@ const printer = device({
   group: { id: 4, name: 'IoT' },
   addresses: [
     {
-      id: 1, device_id: 1, ip_address: '192.168.1.20', protocol: 'V4', source: 'Arp',
-      first_seen: '2026-01-01T10:00:00Z', last_seen: '2026-01-01T12:00:00Z',
+      id: 1,
+      device_id: 1,
+      ip_address: '192.168.1.20',
+      protocol: 'V4',
+      source: 'Arp',
+      first_seen: '2026-01-01T10:00:00Z',
+      last_seen: '2026-01-01T12:00:00Z',
     },
   ],
 });
@@ -86,7 +91,9 @@ describe('filterDevices', () => {
   });
 
   it('combines filters', () => {
-    expect(ids(filterDevices(all, { ...NO_FILTER, group: 4, status: 'online', query: 'tv' }))).toEqual([3]);
+    expect(
+      ids(filterDevices(all, { ...NO_FILTER, group: 4, status: 'online', query: 'tv' })),
+    ).toEqual([3]);
   });
 });
 
@@ -101,7 +108,11 @@ describe('isFiltering', () => {
 
 describe('sortDevices', () => {
   it('sorts by name naturally and in both directions', () => {
-    const named = [device({ id: 10, label: 'Box 10' }), device({ id: 2, label: 'Box 2' }), device({ id: 3, label: 'alpha' })];
+    const named = [
+      device({ id: 10, label: 'Box 10' }),
+      device({ id: 2, label: 'Box 2' }),
+      device({ id: 3, label: 'alpha' }),
+    ];
     expect(ids(sortDevices(named, 'name', 'asc'))).toEqual([3, 2, 10]);
     expect(ids(sortDevices(named, 'name', 'desc'))).toEqual([10, 2, 3]);
   });

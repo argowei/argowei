@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { tap } from 'rxjs';
 
 import { AuthService } from './auth.service';
+import { API_BASE } from './api';
 
 /**
  * Sends the user to the login page when the API reports an expired or
@@ -20,7 +21,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
         if (
           error instanceof HttpErrorResponse &&
           error.status === 401 &&
-          !request.url.startsWith('/api/auth/')
+          !request.url.startsWith(`${API_BASE}/auth/`)
         ) {
           auth.markExpired();
           void router.navigate(['/login'], {

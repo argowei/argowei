@@ -15,12 +15,23 @@ import { safeReturnUrl } from '../../core/auth.guard';
       <h1>Sign in</h1>
 
       <label for="username">Username</label>
-      <input id="username" name="username" autocomplete="username" required
-             [(ngModel)]="username" />
+      <input
+        id="username"
+        name="username"
+        autocomplete="username"
+        required
+        [(ngModel)]="username"
+      />
 
       <label for="password">Password</label>
-      <input id="password" name="password" type="password"
-             autocomplete="current-password" required [(ngModel)]="password" />
+      <input
+        id="password"
+        name="password"
+        type="password"
+        autocomplete="current-password"
+        required
+        [(ngModel)]="password"
+      />
 
       @if (error()) {
         <p class="error" role="alert">{{ error() }}</p>

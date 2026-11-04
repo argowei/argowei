@@ -2,6 +2,8 @@
 //! no root, raw socket or network is needed. Needs Postgres like the other
 //! integration tests (`DATABASE_URL`).
 
+mod common;
+
 use std::collections::VecDeque;
 use std::net::Ipv4Addr;
 use std::sync::mpsc;
@@ -13,33 +15,15 @@ use argowei_api::discovery::{
     ScanSummary, Scanner,
 };
 use argowei_api::presence::PresencePolicy;
-use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use common::{count, host, minutes, t0, POLICY};
 use sqlx::PgPool;
 
-const POLICY: PresencePolicy = PresencePolicy {
-    offline_after_missed_scans: 3,
-    offline_after: Duration::from_secs(15 * 60),
-};
 const MAC_A: &str = "aa:bb:cc:00:00:01";
 const MAC_B: &str = "aa:bb:cc:00:00:02";
 
-fn host(ip: [u8; 4], mac: &str) -> ObservedHost {
-    ObservedHost {
-        ip: Ipv4Addr::from(ip),
-        mac: mac.to_owned(),
-    }
-}
-
 async fn rec(db: &PgPool, hosts: &[ObservedHost], at: DateTime<Utc>) -> sqlx::Result<ScanSummary> {
     record_scan(db, "eth0", hosts, at, &POLICY).await
-}
-
-fn t0() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap()
-}
-
-fn minutes(n: i64) -> ChronoDuration {
-    ChronoDuration::minutes(n)
 }
 
 async fn is_online(db: &PgPool, mac: &str) -> bool {
@@ -62,19 +46,9 @@ async fn event_types(db: &PgPool, mac: &str) -> Vec<String> {
     .unwrap()
 }
 
-async fn count(db: &PgPool, table: &str) -> i64 {
-    sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
-        .fetch_one(db)
-        .await
-        .unwrap()
-}
-
 #[sqlx::test(migrations = "../../migrations")]
 async fn first_scan_creates_devices_and_addresses(db: PgPool) {
-    let hosts = [
-        host([192, 168, 1, 10], MAC_A),
-        host([192, 168, 1, 11], MAC_B),
-    ];
+    let hosts = [host(10, MAC_A), host(11, MAC_B)];
 
     let summary = rec(&db, &hosts, t0()).await.unwrap();
 
@@ -106,7 +80,7 @@ async fn first_scan_creates_devices_and_addresses(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn rescanning_updates_last_seen_without_duplicates(db: PgPool) {
-    let hosts = [host([192, 168, 1, 10], MAC_A)];
+    let hosts = [host(10, MAC_A)];
     rec(&db, &hosts, t0()).await.unwrap();
 
     let later = t0() + ChronoDuration::minutes(5);
@@ -134,7 +108,7 @@ async fn rescanning_updates_last_seen_without_duplicates(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_older_scan_never_moves_last_seen_backwards(db: PgPool) {
-    let hosts = [host([192, 168, 1, 10], MAC_A)];
+    let hosts = [host(10, MAC_A)];
     let later = t0() + ChronoDuration::minutes(5);
     rec(&db, &hosts, later).await.unwrap();
 
@@ -149,14 +123,10 @@ async fn an_older_scan_never_moves_last_seen_backwards(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_device_that_changes_ip_keeps_both_addresses(db: PgPool) {
-    rec(&db, &[host([192, 168, 1, 10], MAC_A)], t0())
-        .await
-        .unwrap();
+    rec(&db, &[host(10, MAC_A)], t0()).await.unwrap();
 
     let later = t0() + ChronoDuration::hours(1);
-    let summary = rec(&db, &[host([192, 168, 1, 50], MAC_A)], later)
-        .await
-        .unwrap();
+    let summary = rec(&db, &[host(50, MAC_A)], later).await.unwrap();
 
     assert_eq!(summary.new_devices, 0);
     assert_eq!(summary.new_addresses, 1);
@@ -167,14 +137,10 @@ async fn a_device_that_changes_ip_keeps_both_addresses(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_ip_moving_between_devices_preserves_history(db: PgPool) {
-    rec(&db, &[host([192, 168, 1, 10], MAC_A)], t0())
-        .await
-        .unwrap();
+    rec(&db, &[host(10, MAC_A)], t0()).await.unwrap();
 
     let later = t0() + ChronoDuration::hours(2);
-    let summary = rec(&db, &[host([192, 168, 1, 10], MAC_B)], later)
-        .await
-        .unwrap();
+    let summary = rec(&db, &[host(10, MAC_B)], later).await.unwrap();
 
     assert_eq!(summary.new_devices, 1);
     assert_eq!(summary.new_addresses, 1);
@@ -197,21 +163,12 @@ async fn an_ip_moving_between_devices_preserves_history(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn silent_devices_are_left_untouched(db: PgPool) {
-    rec(
-        &db,
-        &[
-            host([192, 168, 1, 10], MAC_A),
-            host([192, 168, 1, 11], MAC_B),
-        ],
-        t0(),
-    )
-    .await
-    .unwrap();
-
-    let later = t0() + ChronoDuration::minutes(5);
-    rec(&db, &[host([192, 168, 1, 10], MAC_A)], later)
+    rec(&db, &[host(10, MAC_A), host(11, MAC_B)], t0())
         .await
         .unwrap();
+
+    let later = t0() + ChronoDuration::minutes(5);
+    rec(&db, &[host(10, MAC_A)], later).await.unwrap();
 
     let (online, last): (bool, DateTime<Utc>) =
         sqlx::query_as("SELECT is_online, last_seen FROM devices WHERE mac_address = $1")
@@ -225,9 +182,7 @@ async fn silent_devices_are_left_untouched(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_empty_scan_changes_nothing(db: PgPool) {
-    rec(&db, &[host([192, 168, 1, 10], MAC_A)], t0())
-        .await
-        .unwrap();
+    rec(&db, &[host(10, MAC_A)], t0()).await.unwrap();
 
     let summary = rec(&db, &[], t0() + ChronoDuration::minutes(5))
         .await
@@ -266,7 +221,7 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn run_scan_stores_what_the_scanner_found(db: PgPool) {
-    let scanner = FakeScanner::scripted(vec![Ok(vec![host([192, 168, 1, 10], MAC_A)])]);
+    let scanner = FakeScanner::scripted(vec![Ok(vec![host(10, MAC_A)])]);
 
     let outcome = run_scan(
         &db,
@@ -313,7 +268,7 @@ impl Scanner for BlockingScanner {
     fn scan(&self, _interface: &str, _timeout: Duration) -> Result<Vec<ObservedHost>, ScanError> {
         self.started.lock().unwrap().send(()).unwrap();
         self.release.lock().unwrap().recv().unwrap();
-        Ok(vec![host([192, 168, 1, 10], MAC_A)])
+        Ok(vec![host(10, MAC_A)])
     }
 }
 
@@ -345,7 +300,10 @@ async fn scans_of_the_same_interface_never_overlap(db: PgPool) {
     assert_eq!(second, ScanOutcome::Skipped);
 
     // A different interface is independent.
-    let other = FakeScanner::scripted(vec![Ok(vec![host([10, 0, 0, 5], MAC_B)])]);
+    let other = FakeScanner::scripted(vec![Ok(vec![ObservedHost {
+        ip: Ipv4Addr::new(10, 0, 0, 5),
+        mac: MAC_B.to_owned(),
+    }])]);
     let third = run_scan(&db, &other, &locks, "wlan0", TIMEOUT, &POLICY)
         .await
         .unwrap();
@@ -367,9 +325,7 @@ async fn scans_of_the_same_interface_never_overlap(db: PgPool) {
 
 /// Scans at `t0`, then empty scans every 5 minutes up to `until_minutes`.
 async fn seen_once_then_silent(db: &PgPool, until_minutes: i64) {
-    rec(db, &[host([192, 168, 1, 10], MAC_A)], t0())
-        .await
-        .unwrap();
+    rec(db, &[host(10, MAC_A)], t0()).await.unwrap();
     let mut at = 5;
     while at <= until_minutes {
         rec(db, &[], t0() + minutes(at)).await.unwrap();
@@ -379,7 +335,7 @@ async fn seen_once_then_silent(db: &PgPool, until_minutes: i64) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_device_is_discovered_exactly_once(db: PgPool) {
-    let hosts = [host([192, 168, 1, 10], MAC_A)];
+    let hosts = [host(10, MAC_A)];
     rec(&db, &hosts, t0()).await.unwrap();
     rec(&db, &hosts, t0() + minutes(5)).await.unwrap();
 
@@ -431,9 +387,7 @@ async fn the_offline_event_carries_its_evidence(db: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_long_scanning_gap_does_not_mark_offline_after_a_single_miss(db: PgPool) {
     // The API was down for two hours; the first scan afterwards finds nothing.
-    rec(&db, &[host([192, 168, 1, 10], MAC_A)], t0())
-        .await
-        .unwrap();
+    rec(&db, &[host(10, MAC_A)], t0()).await.unwrap();
     let summary = rec(&db, &[], t0() + minutes(120)).await.unwrap();
 
     assert_eq!(summary.went_offline, 0);
@@ -446,7 +400,7 @@ async fn enough_misses_inside_the_grace_time_stay_online(db: PgPool) {
         offline_after_missed_scans: 3,
         offline_after: Duration::from_secs(60 * 60),
     };
-    record_scan(&db, "eth0", &[host([192, 168, 1, 10], MAC_A)], t0(), &slow)
+    record_scan(&db, "eth0", &[host(10, MAC_A)], t0(), &slow)
         .await
         .unwrap();
     for at in [10, 20, 30, 40] {
@@ -465,7 +419,7 @@ async fn enough_misses_inside_the_grace_time_stay_online(db: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_returning_device_comes_online_exactly_once(db: PgPool) {
     seen_once_then_silent(&db, 15).await;
-    let back = [host([192, 168, 1, 10], MAC_A)];
+    let back = [host(10, MAC_A)];
 
     let summary = rec(&db, &back, t0() + minutes(20)).await.unwrap();
     rec(&db, &back, t0() + minutes(25)).await.unwrap();
@@ -480,15 +434,9 @@ async fn a_returning_device_comes_online_exactly_once(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn scans_of_other_interfaces_do_not_count_as_misses(db: PgPool) {
-    record_scan(
-        &db,
-        "eth0",
-        &[host([192, 168, 1, 10], MAC_A)],
-        t0(),
-        &POLICY,
-    )
-    .await
-    .unwrap();
+    record_scan(&db, "eth0", &[host(10, MAC_A)], t0(), &POLICY)
+        .await
+        .unwrap();
 
     // Many empty scans, but on a different interface.
     for at in [5, 10, 15, 20, 25, 30] {
@@ -502,17 +450,10 @@ async fn scans_of_other_interfaces_do_not_count_as_misses(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_evidence_behind_presence_is_recorded(db: PgPool) {
-    rec(
-        &db,
-        &[
-            host([192, 168, 1, 10], MAC_A),
-            host([192, 168, 1, 11], MAC_B),
-        ],
-        t0(),
-    )
-    .await
-    .unwrap();
-    rec(&db, &[host([192, 168, 1, 10], MAC_A)], t0() + minutes(5))
+    rec(&db, &[host(10, MAC_A), host(11, MAC_B)], t0())
+        .await
+        .unwrap();
+    rec(&db, &[host(10, MAC_A)], t0() + minutes(5))
         .await
         .unwrap();
     rec(&db, &[], t0() + minutes(10)).await.unwrap();
@@ -545,9 +486,7 @@ async fn the_evidence_behind_presence_is_recorded(db: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_failed_scan_leaves_presence_untouched(db: PgPool) {
-    rec(&db, &[host([192, 168, 1, 10], MAC_A)], t0())
-        .await
-        .unwrap();
+    rec(&db, &[host(10, MAC_A)], t0()).await.unwrap();
 
     // run_scan only records after the scanner succeeds, so a failure is not
     // a scan: no scan row, hence no missed scan for anyone.

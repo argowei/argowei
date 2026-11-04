@@ -1,4 +1,10 @@
-import { DEVICE_TYPE_LABELS, Device, DeviceType, TRUST_LEVELS, TrustLevel } from '../../core/models';
+import {
+  DEVICE_TYPE_LABELS,
+  Device,
+  DeviceType,
+  TRUST_LEVELS,
+  TrustLevel,
+} from '../../core/device.models';
 
 export interface DeviceFilter {
   query: string;
@@ -81,11 +87,7 @@ function compare(a: Device, b: Device, key: SortKey): number {
 }
 
 /** Stable sort; ties fall back to the name so the order never jumps around. */
-export function sortDevices(
-  devices: Device[],
-  key: SortKey,
-  direction: SortDirection,
-): Device[] {
+export function sortDevices(devices: Device[], key: SortKey, direction: SortDirection): Device[] {
   const sign = direction === 'asc' ? 1 : -1;
   return [...devices].sort(
     (a, b) => sign * compare(a, b, key) || compare(a, b, 'name') || a.id - b.id,

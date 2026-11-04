@@ -1,3 +1,6 @@
+//! Starts the API: reads the settings, prepares the database state (setup
+//! token, baseline window), starts scheduled discovery and serves HTTP.
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 

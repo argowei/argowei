@@ -1,21 +1,36 @@
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
 
 import { DEVICE_POLL_MS } from '../../core/devices.service';
-import { Device, Group } from '../../core/models';
-import { device, group } from '../../testing';
+import { Device } from '../../core/device.models';
+import { Group } from '../../core/group.models';
+import { device, group, providePageTesting, sleep } from '../../testing';
 import { DeviceList } from './device-list';
 
-const sleep = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const tv = device({ id: 1, label: 'Living room TV', vendor: 'Samsung', trust_level: 'restricted', device_type: 'iot',
-  group_id: 4, group: { id: 4, name: 'IoT' }, last_seen: '2026-01-01T11:00:00Z' });
-const printer = device({ id: 2, label: 'Office printer', trust_level: 'normal', device_type: 'printer',
-  last_seen: '2026-01-01T12:00:00Z' });
-const phone = device({ id: 3, label: 'Phone', is_online: false, trust_level: 'suspicious',
-  last_seen: '2026-01-01T08:00:00Z' });
+const tv = device({
+  id: 1,
+  label: 'Living room TV',
+  vendor: 'Samsung',
+  trust_level: 'restricted',
+  device_type: 'iot',
+  group_id: 4,
+  group: { id: 4, name: 'IoT' },
+  last_seen: '2026-01-01T11:00:00Z',
+});
+const printer = device({
+  id: 2,
+  label: 'Office printer',
+  trust_level: 'normal',
+  device_type: 'printer',
+  last_seen: '2026-01-01T12:00:00Z',
+});
+const phone = device({
+  id: 3,
+  label: 'Phone',
+  is_online: false,
+  trust_level: 'suspicious',
+  last_seen: '2026-01-01T08:00:00Z',
+});
 const groups: Group[] = [group(1, 'Unassigned'), group(4, 'IoT')];
 
 interface Rendered {
@@ -27,12 +42,7 @@ interface Rendered {
 describe('DeviceList', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [
-        provideHttpClient(),
-        provideHttpClientTesting(),
-        provideRouter([]),
-        { provide: DEVICE_POLL_MS, useValue: 0 },
-      ],
+      providers: [...providePageTesting(), { provide: DEVICE_POLL_MS, useValue: 0 }],
     });
   });
 
@@ -83,13 +93,17 @@ describe('DeviceList', () => {
     const r = await render();
 
     expect(names(r.el)).toEqual(['Office printer', 'Living room TV', 'Phone']);
-    expect(r.el.querySelector<HTMLAnchorElement>('tbody th a')!.getAttribute('href')).toBe('/devices/2');
+    expect(r.el.querySelector<HTMLAnchorElement>('tbody th a')!.getAttribute('href')).toBe(
+      '/devices/2',
+    );
     expect(r.el.textContent).toContain('3 of 3');
   });
 
   it('shows the device type in its own column', async () => {
     const r = await render();
-    const types = Array.from(r.el.querySelectorAll('tbody td.col-type')).map((td) => td.textContent?.trim());
+    const types = Array.from(r.el.querySelectorAll('tbody td.col-type')).map((td) =>
+      td.textContent?.trim(),
+    );
 
     expect(types).toEqual(['Printer', 'IoT device', 'Unknown']);
   });
@@ -173,7 +187,9 @@ describe('DeviceList', () => {
   it('sorts by a column and toggles the direction, announcing it', async () => {
     const r = await render();
     const header = (label: string) =>
-      Array.from(r.el.querySelectorAll<HTMLElement>('thead th')).find((th) => th.textContent?.includes(label))!;
+      Array.from(r.el.querySelectorAll<HTMLElement>('thead th')).find((th) =>
+        th.textContent?.includes(label),
+      )!;
 
     header('Name').querySelector('button')!.click();
     r.fixture.detectChanges();

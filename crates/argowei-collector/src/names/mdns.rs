@@ -15,7 +15,8 @@ use argowei_core::names::{sanitize_name, NameSource};
 use super::dns::{self, TYPE_PTR};
 use super::{ensure_local, query_id, udp_exchange, HostnameResolver, ResolveError, Target};
 
-pub const DEFAULT_PORT: u16 = 5353;
+/// The port mDNS responders listen on, also for unicast queries.
+pub const MDNS_PORT: u16 = 5353;
 
 pub struct MdnsResolver {
     port: u16,
@@ -23,7 +24,7 @@ pub struct MdnsResolver {
 
 impl Default for MdnsResolver {
     fn default() -> Self {
-        Self { port: DEFAULT_PORT }
+        Self { port: MDNS_PORT }
     }
 }
 

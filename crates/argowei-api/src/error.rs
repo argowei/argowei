@@ -1,5 +1,14 @@
-//! Error type shared by API handlers: renders as a JSON `{"error": "..."}`
-//! body with the matching status code.
+//! The error type of the API handlers.
+//!
+//! Every handler failure is an [`ApiError`], rendered as `{"error": "..."}`
+//! with the matching status code. Database errors are logged with their cause
+//! and reach the client only as a 503 without details: the client cannot act on
+//! them, and should not learn about the schema from them.
+//!
+//! Some failures are worth an audit entry of their own (a failed login, a
+//! denied setup). A handler that writes one returns the error wrapped with
+//! [`ApiError::audited`], so the safety-net middleware in [`crate::audit`] does
+//! not record the same request a second time.
 
 use axum::http::header::RETRY_AFTER;
 use axum::http::{HeaderValue, StatusCode};
@@ -7,40 +16,36 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
-use crate::audit::Audited;
+use crate::audit::mark_audited;
 
 #[derive(Debug)]
 pub enum ApiError {
+    /// No valid session (401).
     Unauthorized,
+    /// The addressed resource does not exist (404).
     NotFound(&'static str),
+    /// Authenticated, or not needing authentication, but not allowed (403).
     Forbidden(&'static str),
+    /// The request is malformed or fails validation (400); the message says why.
     BadRequest(String),
+    /// The request clashes with the current state (409), e.g. a duplicate name.
     Conflict(&'static str),
-    TooManyRequests {
-        retry_after_secs: u64,
-    },
+    /// Throttled; the client may retry after the given number of seconds (429).
+    TooManyRequests { retry_after_secs: u64 },
+    /// A dependency (the database) failed; details are only logged (503).
     Unavailable,
-    /// Wraps a failure the handler already wrote to the audit log, so the
-    /// safety-net middleware does not add a second entry.
+    /// A failure the handler has already written to the audit log.
     Audited(Box<ApiError>),
 }
 
 impl ApiError {
-    /// For failures already written to the audit log by the handler.
+    /// Marks a failure as already audited by the handler.
     pub fn audited(self) -> ApiError {
         ApiError::Audited(Box::new(self))
     }
-}
 
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        if let ApiError::Audited(inner) = self {
-            let mut response = inner.into_response();
-            response.extensions_mut().insert(Audited);
-            return response;
-        }
-
-        let (status, message) = match &self {
+    fn status_and_message(&self) -> (StatusCode, String) {
+        match self {
             ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "authentication required".into()),
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, (*msg).to_owned()),
             ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, (*msg).to_owned()),
@@ -53,22 +58,45 @@ impl IntoResponse for ApiError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "service unavailable".into(),
             ),
-            ApiError::Audited(_) => unreachable!("handled above"),
-        };
-
-        let mut response = (status, Json(json!({ "error": message }))).into_response();
-        if let ApiError::TooManyRequests { retry_after_secs } = self {
-            response
-                .headers_mut()
-                .insert(RETRY_AFTER, HeaderValue::from(retry_after_secs));
+            ApiError::Audited(inner) => inner.status_and_message(),
         }
-        response
+    }
+
+    fn retry_after(&self) -> Option<u64> {
+        match self {
+            ApiError::TooManyRequests { retry_after_secs } => Some(*retry_after_secs),
+            ApiError::Audited(inner) => inner.retry_after(),
+            _ => None,
+        }
     }
 }
 
-pub fn db_error(error: sqlx::Error) -> ApiError {
-    tracing::error!(%error, "database error");
-    ApiError::Unavailable
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, message) = self.status_and_message();
+        let mut response = (status, Json(json!({ "error": message }))).into_response();
+        if let Some(seconds) = self.retry_after() {
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from(seconds));
+        }
+
+        match self {
+            ApiError::Audited(_) => mark_audited(response),
+            _ => response,
+        }
+    }
+}
+
+/// Database errors are logged here, once, and answered with a generic JSON
+/// 503. This lets handlers use `?` on any query; the few that turn a specific
+/// database error into something else (a duplicate name into 409) match on it
+/// first; see [`is_unique_violation`] and [`is_foreign_key_violation`].
+impl From<sqlx::Error> for ApiError {
+    fn from(error: sqlx::Error) -> Self {
+        tracing::error!(%error, "database error");
+        ApiError::Unavailable
+    }
 }
 
 /// A unique index rejected the write (e.g. a duplicate name).
@@ -86,4 +114,70 @@ pub fn is_foreign_key_violation(error: &sqlx::Error) -> bool {
         error.as_database_error().map(|e| e.kind()),
         Some(sqlx::error::ErrorKind::ForeignKeyViolation)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::http::header::CONTENT_TYPE;
+
+    fn status_of(error: ApiError) -> StatusCode {
+        error.into_response().status()
+    }
+
+    #[test]
+    fn each_error_has_its_status() {
+        assert_eq!(status_of(ApiError::Unauthorized), StatusCode::UNAUTHORIZED);
+        assert_eq!(status_of(ApiError::NotFound("x")), StatusCode::NOT_FOUND);
+        assert_eq!(status_of(ApiError::Forbidden("x")), StatusCode::FORBIDDEN);
+        assert_eq!(
+            status_of(ApiError::BadRequest("x".into())),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(status_of(ApiError::Conflict("x")), StatusCode::CONFLICT);
+        assert_eq!(
+            status_of(ApiError::Unavailable),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn database_errors_return_a_generic_json_response() {
+        let response = ApiError::from(sqlx::Error::PoolClosed).into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({ "error": "service unavailable" })
+        );
+    }
+
+    #[test]
+    fn an_audited_error_keeps_status_and_retry_header_and_is_marked() {
+        let response = ApiError::TooManyRequests {
+            retry_after_secs: 7,
+        }
+        .audited()
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[RETRY_AFTER], "7");
+        assert!(response
+            .extensions()
+            .get::<crate::audit::Audited>()
+            .is_some());
+    }
+
+    #[test]
+    fn a_plain_error_is_left_to_the_audit_middleware() {
+        let response = ApiError::Forbidden("no").into_response();
+
+        assert!(response
+            .extensions()
+            .get::<crate::audit::Audited>()
+            .is_none());
+    }
 }

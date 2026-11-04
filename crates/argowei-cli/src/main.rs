@@ -1,5 +1,11 @@
-use clap::{Parser, Subcommand};
+//! `argowei`: command-line tools for looking at the local network without
+//! the API: list interfaces, run one ARP scan, ask the name sources about a
+//! device.
+
 use std::error::Error;
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
 
 mod interfaces;
 mod resolve;
@@ -49,9 +55,19 @@ enum Command {
     },
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let cli = Cli::parse();
+/// Prints errors as `argowei: <message>` (not Rust's `Debug` form) and
+/// exits with status 1.
+fn main() -> ExitCode {
+    match run(Cli::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("argowei: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
 
+fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     match cli.command {
         Command::About => {
             println!(

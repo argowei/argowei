@@ -1,3 +1,6 @@
+//! `argowei interfaces`: the network interfaces from `/sys/class/net`, with
+//! their kind, MAC and state.
+
 use argowei_core::network_interface::{NetworkInterface, NetworkInterfaceKind};
 use std::{fs, io, path::Path};
 

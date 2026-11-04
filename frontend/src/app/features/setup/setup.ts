@@ -15,27 +15,51 @@ const MIN_PASSWORD_LENGTH = 12;
       <p class="eyebrow">First start</p>
       <h1>Create admin</h1>
       <p class="hint">
-        Paste the setup token from the server log
-        (<code>first-run setup token: …</code>).
+        Paste the setup token from the server log (<code>first-run setup token: …</code>).
       </p>
 
       <label for="token">Setup token</label>
-      <input id="token" name="token" autocomplete="off" spellcheck="false" required
-             [(ngModel)]="token" />
+      <input
+        id="token"
+        name="token"
+        autocomplete="off"
+        spellcheck="false"
+        required
+        [(ngModel)]="token"
+      />
 
       <label for="username">Username</label>
-      <input id="username" name="username" autocomplete="username" required
-             minlength="3" maxlength="64" [(ngModel)]="username" />
+      <input
+        id="username"
+        name="username"
+        autocomplete="username"
+        required
+        minlength="3"
+        maxlength="64"
+        [(ngModel)]="username"
+      />
 
       <label for="password">Password</label>
-      <input id="password" name="password" type="password"
-             autocomplete="new-password" required [(ngModel)]="password"
-             aria-describedby="password-hint" />
+      <input
+        id="password"
+        name="password"
+        type="password"
+        autocomplete="new-password"
+        required
+        [(ngModel)]="password"
+        aria-describedby="password-hint"
+      />
       <p id="password-hint" class="hint">At least {{ minLength }} characters.</p>
 
       <label for="confirm">Confirm password</label>
-      <input id="confirm" name="confirm" type="password"
-             autocomplete="new-password" required [(ngModel)]="confirm" />
+      <input
+        id="confirm"
+        name="confirm"
+        type="password"
+        autocomplete="new-password"
+        required
+        [(ngModel)]="confirm"
+      />
 
       @if (error()) {
         <p class="error" role="alert">{{ error() }}</p>
@@ -72,14 +96,12 @@ export class Setup {
     this.busy.set(true);
     this.error.set(null);
 
-    this.auth
-      .setup(this.token().trim(), this.username().trim(), this.password())
-      .subscribe({
-        next: () => void this.router.navigateByUrl('/'),
-        error: (error) => {
-          this.error.set(describeAuthError(error));
-          this.busy.set(false);
-        },
-      });
+    this.auth.setup(this.token().trim(), this.username().trim(), this.password()).subscribe({
+      next: () => void this.router.navigateByUrl('/'),
+      error: (error) => {
+        this.error.set(describeAuthError(error));
+        this.busy.set(false);
+      },
+    });
   }
 }

@@ -1,0 +1,3 @@
+# rustfmt defaults are used on purpose; this file pins the edition so editors and
+# `cargo fmt` agree, and is the place to add options should we ever need one.
+edition = "2021"

@@ -1,14 +1,15 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { EMPTY, Observable, catchError, merge, switchMap, tap, timer } from 'rxjs';
+import { EMPTY, Observable, catchError, merge, switchMap, tap } from 'rxjs';
 
 import { describeApiError } from '../../core/api-error';
 import { ALERT_POLL_MS, AlertsService } from '../../core/alerts.service';
 import { Alert, AlertView, SuggestedAction } from '../../core/alerts.models';
 import { DevicesService } from '../../core/devices.service';
-import { TrustLevel } from '../../core/models';
-import { timeAgo } from '../../core/time';
+import { TrustLevel } from '../../core/device.models';
+import { poll } from '../../core/poll';
+import { TimeAgoPipe } from '../../shared/time-ago.pipe';
 
 /** Actions that only classify the device; the rest need enforcement. */
 const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> = {
@@ -16,19 +17,35 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
   restrict: 'restricted',
 };
 
+/**
+ * Alerts, active or resolved, with what can be done about each: acknowledge,
+ * resolve, or classify the device (trust, restrict) and resolve in one go.
+ */
 @Component({
   selector: 'app-alert-list',
-  imports: [RouterLink],
+  imports: [RouterLink, TimeAgoPipe],
   template: `
     <section class="page">
       <header class="page-head">
         <h1>Alerts</h1>
         <div class="views" role="group" aria-label="Which alerts to show">
-          <button type="button" class="view" [attr.aria-pressed]="view() === 'active'" (click)="show('active')">
+          <button
+            type="button"
+            class="view"
+            [attr.aria-pressed]="view() === 'active'"
+            (click)="show('active')"
+          >
             Active
-            @if (activeCount() > 0) { <span class="count">{{ activeCount() }}</span> }
+            @if (activeCount() > 0) {
+              <span class="count">{{ activeCount() }}</span>
+            }
           </button>
-          <button type="button" class="view" [attr.aria-pressed]="view() === 'resolved'" (click)="show('resolved')">
+          <button
+            type="button"
+            class="view"
+            [attr.aria-pressed]="view() === 'resolved'"
+            (click)="show('resolved')"
+          >
             Resolved
           </button>
         </div>
@@ -59,26 +76,36 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
         <div class="state">
           @if (view() === 'active') {
             <p><strong>No active alerts.</strong></p>
-            <p class="muted">You will see an alert here when a device appears that Argowei has not seen before.</p>
+            <p class="muted">
+              You will see an alert here when a device appears that Argowei has not seen before.
+            </p>
           } @else {
             <p>No resolved alerts yet.</p>
           }
         </div>
       } @else {
         @if (error()) {
-          <p class="banner warn" role="alert">Could not refresh: {{ error() }} Showing the last known alerts.</p>
+          <p class="banner warn" role="alert">
+            Could not refresh: {{ error() }} Showing the last known alerts.
+          </p>
         }
         <ul class="alerts">
           @for (alert of alerts(); track alert.id) {
             <li class="alert" [class.resolved]="alert.status === 'resolved'">
               <div class="top">
                 <span class="pill" [class]="'sev-' + alert.severity">{{ alert.severity }}</span>
-                <h2>{{ title(alert) }}@if (alert.device; as device) {: <a [routerLink]="['/devices', device.id]">{{ device.display_name }}</a>}</h2>
+                <h2>
+                  {{ title(alert) }}
+                  @if (alert.device; as device) {
+                    : <a [routerLink]="['/devices', device.id]">{{ device.display_name }}</a>
+                  }
+                </h2>
                 <span class="pill status" [class]="'st-' + alert.status">{{ alert.status }}</span>
               </div>
 
               <p class="meta">
-                {{ details(alert) }} · <span [title]="alert.created_at">{{ ago(alert.created_at) }}</span>
+                {{ details(alert) }} ·
+                <span [title]="alert.created_at">{{ alert.created_at | timeAgo }}</span>
                 @if (alert.status === 'acknowledged' && alert.acknowledged_by) {
                   · acknowledged by {{ alert.acknowledged_by }}
                 }
@@ -90,15 +117,35 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
               @if (alert.status !== 'resolved') {
                 <div class="actions">
                   @for (action of actions(alert); track action.action) {
-                    <button type="button" class="secondary" [disabled]="!action.available || busy(alert.id)"
-                            [title]="action.available ? (action.effect ?? '') : (action.reason ?? '')"
-                            (click)="apply(alert, action)">{{ action.label }}</button>
+                    <button
+                      type="button"
+                      class="secondary"
+                      [disabled]="!action.available || busy(alert.id)"
+                      [title]="action.available ? (action.effect ?? '') : (action.reason ?? '')"
+                      (click)="apply(alert, action)"
+                    >
+                      {{ action.label }}
+                    </button>
                   }
                   <span class="spacer"></span>
                   @if (alert.status === 'open') {
-                    <button type="button" class="secondary" [disabled]="busy(alert.id)" (click)="acknowledge(alert)">Acknowledge</button>
+                    <button
+                      type="button"
+                      class="secondary"
+                      [disabled]="busy(alert.id)"
+                      (click)="acknowledge(alert)"
+                    >
+                      Acknowledge
+                    </button>
                   }
-                  <button type="button" class="secondary" [disabled]="busy(alert.id)" (click)="resolve(alert)">Resolve</button>
+                  <button
+                    type="button"
+                    class="secondary"
+                    [disabled]="busy(alert.id)"
+                    (click)="resolve(alert)"
+                  >
+                    Resolve
+                  </button>
                 </div>
                 @if (failure(alert.id); as message) {
                   <p class="error" role="alert">{{ message }}</p>
@@ -108,7 +155,12 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
           }
         </ul>
         @if (nextBefore() !== null) {
-          <button type="button" class="secondary more" [disabled]="loadingMore()" (click)="loadMore()">
+          <button
+            type="button"
+            class="secondary more"
+            [disabled]="loadingMore()"
+            (click)="loadMore()"
+          >
             {{ loadingMore() ? 'Loading…' : 'Load more' }}
           </button>
         }
@@ -116,32 +168,113 @@ const TRUST_FOR_ACTION: Partial<Record<SuggestedAction['action'], TrustLevel>> =
     </section>
   `,
   styles: `
-    .page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-    .page-head h1 { margin: 0; font-size: 1.6rem; }
-    .views { display: flex; gap: 0.4rem; }
-    .view { margin: 0; padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 0.5rem;
-            background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; }
-    .view[aria-pressed='true'] { color: var(--text); border-color: var(--accent); }
-    .count { margin-left: 0.4rem; padding: 0 0.45rem; border-radius: 1rem; background: var(--warn); color: var(--bg); font-size: 0.75rem; }
-    .banner { margin: 1rem 0; padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: 0.5rem; }
-    .banner.info { border-color: var(--accent); }
-    .banner.warn { border-color: var(--warn); color: var(--warn); }
-    .state { margin-top: 1rem; padding: 2rem; text-align: center; border: 1px dashed var(--border); border-radius: 0.8rem; }
-    .state button { margin-top: 0.5rem; }
-    .alerts { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 0.8rem; }
-    .alert { padding: 1rem 1.2rem; border: 1px solid var(--border); border-radius: 0.8rem; background: var(--bg-card); }
-    .alert.resolved { opacity: 0.7; }
-    .top { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
-    .top h2 { margin: 0; font-size: 1rem; flex: 1 1 12rem; overflow-wrap: anywhere; }
-    .meta { margin: 0.4rem 0 0.8rem; color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }
-    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-    .actions button { margin: 0; padding: 0.4rem 0.8rem; }
-    .actions button:disabled { opacity: 0.45; cursor: not-allowed; }
-    .spacer { flex: 1; }
-    .pill.sev-warning, .pill.st-open { color: var(--warn); border-color: var(--warn); }
-    .pill.sev-critical { color: var(--danger); border-color: var(--danger); }
-    .pill.st-acknowledged { color: var(--accent); border-color: var(--accent); }
-    .more { margin-top: 1rem; }
+    .page-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .page-head h1 {
+      margin: 0;
+      font-size: 1.6rem;
+    }
+    .views {
+      display: flex;
+      gap: 0.4rem;
+    }
+    .view {
+      margin: 0;
+      padding: 0.4rem 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .view[aria-pressed='true'] {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .count {
+      margin-left: 0.4rem;
+      padding: 0 0.45rem;
+      border-radius: 1rem;
+      background: var(--warn);
+      color: var(--bg);
+      font-size: 0.75rem;
+    }
+    .state {
+      margin-top: 1rem;
+    }
+    .alerts {
+      list-style: none;
+      margin: 1rem 0 0;
+      padding: 0;
+      display: grid;
+      gap: 0.8rem;
+    }
+    .alert {
+      padding: 1rem 1.2rem;
+      border: 1px solid var(--border);
+      border-radius: 0.8rem;
+      background: var(--bg-card);
+    }
+    .alert.resolved {
+      opacity: 0.7;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+    }
+    .top h2 {
+      margin: 0;
+      font-size: 1rem;
+      flex: 1 1 12rem;
+      overflow-wrap: anywhere;
+    }
+    .meta {
+      margin: 0.4rem 0 0.8rem;
+      color: var(--muted);
+      font-size: 0.875rem;
+      overflow-wrap: anywhere;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .actions button {
+      margin: 0;
+      padding: 0.4rem 0.8rem;
+    }
+    .actions button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .pill.sev-warning,
+    .pill.st-open {
+      color: var(--warn);
+      border-color: var(--warn);
+    }
+    .pill.sev-critical {
+      color: var(--danger);
+      border-color: var(--danger);
+    }
+    .pill.st-acknowledged {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .more {
+      margin-top: 1rem;
+    }
   `,
 })
 export class AlertList {
@@ -169,16 +302,14 @@ export class AlertList {
     this.load();
     this.api.loadStatus().subscribe({ error: () => undefined });
 
-    if (this.pollMs > 0) {
-      timer(this.pollMs, this.pollMs)
-        .pipe(
-          switchMap(() =>
-            merge(this.refresh(), this.api.loadStatus().pipe(catchError(() => EMPTY))),
-          ),
-          takeUntilDestroyed(inject(DestroyRef)),
-        )
-        .subscribe();
-    }
+    // The first page was just loaded; refresh it in the background from the
+    // next interval on.
+    poll(this.pollMs, { immediate: false })
+      .pipe(
+        switchMap(() => merge(this.refresh(), this.api.loadStatus().pipe(catchError(() => EMPTY)))),
+        takeUntilDestroyed(inject(DestroyRef)),
+      )
+      .subscribe();
   }
 
   protected show(view: AlertView): void {
@@ -279,15 +410,17 @@ export class AlertList {
     if (!trust || !alert.device || !action.available) return;
     this.run(
       alert,
-      this.devices.update(alert.device.id, { trust_level: trust }).pipe(
-        switchMap(() => this.api.resolve(alert.id)),
-      ),
+      this.devices
+        .update(alert.device.id, { trust_level: trust })
+        .pipe(switchMap(() => this.api.resolve(alert.id))),
     );
   }
 
   private run(alert: Alert, request: Observable<Alert>): void {
     this.working.update((set) => new Set(set).add(alert.id));
-    this.failures.update(({ [alert.id]: _gone, ...rest }) => rest);
+    this.failures.update((all) =>
+      Object.fromEntries(Object.entries(all).filter(([id]) => Number(id) !== alert.id)),
+    );
     request.subscribe({
       next: () => {
         this.finish(alert.id);
@@ -321,10 +454,6 @@ export class AlertList {
       payload.ip ? `${payload.ip} on ${payload.interface ?? 'the network'}` : undefined,
     ];
     return parts.filter(Boolean).join(' · ');
-  }
-
-  protected ago(iso: string): string {
-    return timeAgo(iso);
   }
 
   protected endsAt(iso: string | null): string {

@@ -14,10 +14,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
-use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
+use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
-use crate::error::{db_error, is_foreign_key_violation, is_unique_violation, ApiError};
+use crate::error::{is_foreign_key_violation, is_unique_violation, ApiError};
 use crate::state::AppState;
+use crate::validate;
 
 const MAX_NAME_CHARS: usize = 64;
 const MAX_DESCRIPTION_CHARS: usize = 500;
@@ -53,42 +54,17 @@ async fn fetch_groups(db: &PgPool, only: Option<i32>) -> sqlx::Result<Vec<Group>
 }
 
 async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<Group>>, ApiError> {
-    Ok(Json(fetch_groups(&state.db, None).await.map_err(db_error)?))
+    Ok(Json(fetch_groups(&state.db, None).await?))
 }
 
 // --- validation -----------------------------------------------------------
 
 fn normalize_name(raw: &str) -> Result<String, ApiError> {
-    let name = raw.trim();
-    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "name must be 1-{MAX_NAME_CHARS} characters"
-        )));
-    }
-    if name.chars().any(char::is_control) {
-        return Err(ApiError::BadRequest(
-            "name must be a single line without control characters".into(),
-        ));
-    }
-    Ok(name.to_owned())
+    validate::single_line(raw, "name", 1..=MAX_NAME_CHARS)
 }
 
 fn normalize_description(raw: &str) -> Result<String, ApiError> {
-    let text = raw.trim();
-    if text.chars().count() > MAX_DESCRIPTION_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "description must be at most {MAX_DESCRIPTION_CHARS} characters"
-        )));
-    }
-    if text
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-    {
-        return Err(ApiError::BadRequest(
-            "description must not contain control characters".into(),
-        ));
-    }
-    Ok(text.to_owned())
+    validate::multi_line(raw, "description", 0..=MAX_DESCRIPTION_CHARS)
 }
 
 fn validate_defaults(value: &Value) -> Result<(), ApiError> {
@@ -131,7 +107,7 @@ async fn create_group(
     let description = normalize_description(&body.description)?;
     validate_defaults(&body.defaults)?;
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     let id: i32 = sqlx::query_scalar(
         "INSERT INTO device_groups (name, description, defaults) VALUES ($1, $2, $3) RETURNING id",
     )
@@ -144,7 +120,7 @@ async fn create_group(
         if is_unique_violation(&error) {
             ApiError::Conflict("a group with this name already exists")
         } else {
-            db_error(error)
+            ApiError::from(error)
         }
     })?;
     audit::record(
@@ -156,19 +132,17 @@ async fn create_group(
                 json!({ "name": name, "description": description, "defaults": body.defaults }),
             ),
     )
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
+    .await?;
+    tx.commit().await?;
 
     let group = fetch_groups(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .ok_or(ApiError::Unavailable)?;
-    let mut response = (StatusCode::CREATED, Json(group)).into_response();
-    response.extensions_mut().insert(Audited);
-    Ok(response)
+    Ok(mark_audited(
+        (StatusCode::CREATED, Json(group)).into_response(),
+    ))
 }
 
 // --- update ---------------------------------------------------------------
@@ -179,6 +153,15 @@ struct UpdateGroup {
     name: Option<String>,
     description: Option<String>,
     defaults: Option<Value>,
+}
+
+/// The columns an update compares against, read under a row lock.
+#[derive(sqlx::FromRow)]
+struct EditableGroup {
+    name: String,
+    description: String,
+    defaults: Value,
+    is_system: bool,
 }
 
 async fn update_group(
@@ -198,17 +181,22 @@ async fn update_group(
         validate_defaults(defaults)?;
     }
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
-    let (old_name, old_description, old_defaults, is_system): (String, String, Value, bool) =
-        sqlx::query_as(
-            "SELECT name, description, defaults, is_system FROM device_groups \
+    // Locked until commit, as for devices: the audited "before" values must be
+    // the ones the update replaced.
+    let mut tx = state.db.begin().await?;
+    let EditableGroup {
+        name: old_name,
+        description: old_description,
+        defaults: old_defaults,
+        is_system,
+    } = sqlx::query_as(
+        "SELECT name, description, defaults, is_system FROM device_groups \
              WHERE id = $1 FOR UPDATE",
-        )
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(db_error)?
-        .ok_or(ApiError::NotFound("no such group"))?;
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(ApiError::NotFound("no such group"))?;
 
     let name = new_name.unwrap_or_else(|| old_name.clone());
     if is_system && name != old_name {
@@ -249,7 +237,7 @@ async fn update_group(
             if is_unique_violation(&error) {
                 ApiError::Conflict("a group with this name already exists")
             } else {
-                db_error(error)
+                ApiError::from(error)
             }
         })?;
         audit::record(
@@ -259,25 +247,37 @@ async fn update_group(
                 .remote_addr(meta.remote_addr)
                 .payload(json!({ "changes": Value::Object(changes) })),
         )
-        .await
-        .map_err(db_error)?;
+        .await?;
     }
-    tx.commit().await.map_err(db_error)?;
+    tx.commit().await?;
 
     let group = fetch_groups(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .ok_or(ApiError::NotFound("no such group"))?;
-    let mut response = Json(group).into_response();
-    if changed {
-        response.extensions_mut().insert(Audited);
-    }
+    let response = Json(group).into_response();
+    let response = if changed {
+        // Audited above; a request that changed nothing is left to the
+        // middleware's generic entry.
+        mark_audited(response)
+    } else {
+        response
+    };
     Ok(response)
 }
 
 // --- delete ---------------------------------------------------------------
+
+/// What deleting needs to know, read under a row lock so a device cannot be
+/// moved into the group between the check and the delete without the foreign
+/// key noticing (that race is still caught below).
+#[derive(sqlx::FromRow)]
+struct GroupToDelete {
+    name: String,
+    is_system: bool,
+    device_count: i64,
+}
 
 async fn delete_group(
     State(state): State<AppState>,
@@ -285,21 +285,28 @@ async fn delete_group(
     meta: RequestMeta,
     Path(id): Path<i32>,
 ) -> Result<Response, ApiError> {
-    let mut tx = state.db.begin().await.map_err(db_error)?;
-    let (name, is_system, devices): (String, bool, i64) = sqlx::query_as(
-        "SELECT name, is_system, (SELECT count(*) FROM devices WHERE group_id = $1) \
+    // Lock the group so a concurrent rename cannot change what the audit
+    // entry names. A device moved into the group meanwhile is caught by the
+    // foreign key, not by the count read here.
+    let mut tx = state.db.begin().await?;
+    let GroupToDelete {
+        name,
+        is_system,
+        device_count,
+    } = sqlx::query_as(
+        "SELECT name, is_system, \
+                (SELECT count(*) FROM devices WHERE group_id = $1) AS device_count \
          FROM device_groups WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?
+    .await?
     .ok_or(ApiError::NotFound("no such group"))?;
 
     if is_system {
         return Err(ApiError::Conflict("system groups cannot be deleted"));
     }
-    if devices > 0 {
+    if device_count > 0 {
         return Err(ApiError::Conflict(
             "the group still has devices; move them to another group first",
         ));
@@ -314,7 +321,7 @@ async fn delete_group(
             if is_foreign_key_violation(&error) {
                 ApiError::Conflict("the group still has devices; move them to another group first")
             } else {
-                db_error(error)
+                ApiError::from(error)
             }
         })?;
     audit::record(
@@ -324,21 +331,18 @@ async fn delete_group(
             .remote_addr(meta.remote_addr)
             .payload(json!({ "name": name })),
     )
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
+    .await?;
+    tx.commit().await?;
 
-    let mut response = StatusCode::NO_CONTENT.into_response();
-    response.extensions_mut().insert(Audited);
-    Ok(response)
+    Ok(mark_audited(StatusCode::NO_CONTENT.into_response()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn bad(result: Result<impl std::fmt::Debug, ApiError>) {
-        assert!(matches!(result, Err(ApiError::BadRequest(_))), "{result:?}");
+    fn bad<T: std::fmt::Debug>(result: Result<T, ApiError>) {
+        crate::validate::bad_request(result);
     }
 
     #[test]
