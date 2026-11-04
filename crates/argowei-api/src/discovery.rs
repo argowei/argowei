@@ -23,6 +23,7 @@ use tokio::time::{interval, MissedTickBehavior};
 
 use crate::config::Settings;
 use crate::events::{self, Severity};
+use crate::names::{self, NamePipeline};
 use crate::presence::PresencePolicy;
 use crate::state::AppState;
 use serde_json::json;
@@ -450,6 +451,7 @@ pub fn spawn(
     locks: InterfaceLocks,
     status: DiscoveryStatus,
     config: DiscoveryConfig,
+    names: Option<NamePipeline>,
 ) -> Vec<JoinHandle<()>> {
     if config.interfaces.is_empty() {
         tracing::info!("scheduled discovery disabled (ARGOWEI_DISCOVERY_INTERFACES is empty)");
@@ -463,6 +465,7 @@ pub fn spawn(
             status.register(&interface);
             let (db, scanner, locks) = (db.clone(), Arc::clone(&scanner), locks.clone());
             let status = status.clone();
+            let names = names.clone();
             let (period, timeout, policy) = (config.interval, config.timeout, config.presence);
 
             tokio::spawn(async move {
@@ -479,6 +482,11 @@ pub fn spawn(
                     match outcome {
                         Ok(ScanOutcome::Completed(summary)) => {
                             tracing::info!(%interface, ?summary, "discovery scan complete");
+                            // After the scan is stored, in a step of its own: nothing
+                            // a name lookup does can fail or delay the scan result.
+                            if let Some(pipeline) = &names {
+                                names::after_scan(&db, pipeline, &interface).await;
+                            }
                         }
                         Ok(ScanOutcome::Skipped) => {
                             tracing::warn!(%interface, "previous scan still running; skipping");

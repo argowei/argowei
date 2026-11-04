@@ -9,6 +9,7 @@ export function device(overrides: Partial<Device> = {}): Device {
   return {
     id,
     name,
+    name_source: null,
     label: null,
     notes: '',
     display_name: overrides.label ?? name,
@@ -22,6 +23,7 @@ export function device(overrides: Partial<Device> = {}): Device {
     first_seen: '2026-01-01T10:00:00Z',
     last_seen: '2026-01-01T12:00:00Z',
     addresses: [],
+    names: [],
     ...overrides,
   };
 }

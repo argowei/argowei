@@ -1,4 +1,5 @@
 pub mod device;
+pub mod names;
 pub mod network_interface;
 pub mod oui;
 

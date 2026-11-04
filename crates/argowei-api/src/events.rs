@@ -8,6 +8,9 @@ use sqlx::PgExecutor;
 /// First sighting of a MAC address. Also marks the start of the device's
 /// first online period.
 pub const DEVICE_DISCOVERED: &str = "device.discovered";
+/// The name shown for a device changed because a source named it (or a
+/// better-ranked source did). The payload carries every source's answer.
+pub const DEVICE_NAMED: &str = "device.named";
 /// A known device answered again after having been marked offline.
 pub const DEVICE_ONLINE: &str = "device.online";
 /// A device missed enough scans, for long enough, to be considered gone.

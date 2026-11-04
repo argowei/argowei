@@ -88,6 +88,58 @@ describe('DeviceDetail', () => {
 
   const saveButton = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('button[type=submit]')!;
 
+  it('lists what each source called the device and marks the one in use', async () => {
+    const named = device({
+      ...stored,
+      name: 'annas-iphone',
+      name_source: 'dhcp',
+      label: null,
+      display_name: 'annas-iphone',
+      names: [
+        { source: 'dhcp', name: 'annas-iphone', last_seen: '2026-01-01T12:00:00Z' },
+        { source: 'mdns', name: "Anna's iPhone", last_seen: '2026-01-01T11:00:00Z' },
+        { source: 'rdns', name: 'iPhone', last_seen: '2026-01-01T10:00:00Z' },
+      ],
+    });
+    const { el } = await render('7', named);
+
+    const rows = Array.from(el.querySelectorAll('table.names tbody tr')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim());
+    expect(rows[0]).toContain('DHCP lease');
+    expect(rows[0]).toContain('annas-iphone');
+    expect(rows[0]).toContain('shown');
+    expect(rows[1]).toContain('mDNS');
+    expect(rows[1]).toContain("Anna's iPhone");
+    expect(rows[1]).not.toContain('shown');
+    expect(rows[2]).toContain('Reverse DNS');
+    expect(el.textContent).toContain('DHCP beats mDNS');
+  });
+
+  it('says which source the discovered name comes from next to the label', async () => {
+    const { el } = await render('7', device({ ...stored, name: 'iPhone', name_source: 'mdns' }));
+
+    expect(el.querySelector('#label ~ .hint')!.textContent).toContain('discovered name (iPhone, from mDNS)');
+  });
+
+  it('does not claim a source while the name is still the MAC address', async () => {
+    const { el } = await render();
+
+    expect(el.querySelector('#label ~ .hint')!.textContent).toContain('discovered name (aa:bb:cc:00:00:07)');
+    expect(el.querySelector('table.names')).toBeNull();
+    expect(el.textContent).toContain('No name learned yet');
+  });
+
+  it('shows the label as the winner over every discovered name', async () => {
+    const named = device({
+      ...stored,
+      name: 'iPhone',
+      name_source: 'rdns',
+      names: [{ source: 'rdns', name: 'iPhone', last_seen: '2026-01-01T10:00:00Z' }],
+    });
+    const { el } = await render('7', named);
+
+    expect(el.textContent).toContain('Your label "Printer" is shown instead of all of them.');
+  });
+
   it('shows the device profile and addresses', async () => {
     const { el } = await render();
 

@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::names::NameSource;
+
 /// How far a device is trusted. New devices start as `Unknown`; only a user
 /// moves a device to another level.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,8 +45,11 @@ impl TrustLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
     pub id: i32,
-    /// Name derived by discovery. Never set by the user; see `label`.
+    /// Name derived by discovery (the MAC until a source names the device).
+    /// Never set by the user; see `label`.
     pub name: String,
+    /// Which source `name` comes from; `None` while it is just the MAC.
+    pub name_source: Option<NameSource>,
     /// Name chosen by the user. Wins over `name` for display.
     pub label: Option<String>,
     /// Free-text notes written by the user.
@@ -109,6 +114,7 @@ mod tests {
         Device {
             id: 1,
             name: name.to_owned(),
+            name_source: None,
             label: label.map(str::to_owned),
             notes: String::new(),
             group_id: 1,
