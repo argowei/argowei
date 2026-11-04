@@ -1,9 +1,10 @@
 import { HttpClient } from '@angular/common/http';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { catchError, map, of, switchMap, timer } from 'rxjs';
+import { EMPTY, catchError, map, of, switchMap, timer } from 'rxjs';
 
+import { ALERT_POLL_MS, AlertsService } from './core/alerts.service';
 import { AuthService } from './core/auth.service';
 
 interface HealthResponse {
@@ -19,6 +20,13 @@ interface HealthResponse {
         <a class="brand" routerLink="/devices">Argowei</a>
         <nav aria-label="Main">
           <a routerLink="/devices" routerLinkActive="active">Devices</a>
+          <a routerLink="/alerts" routerLinkActive="active">
+            Alerts
+            @if (openAlerts() > 0) {
+              <span class="badge" aria-hidden="true">{{ openAlerts() }}</span>
+              <span class="visually-hidden">({{ openAlerts() }} open)</span>
+            }
+          </a>
         </nav>
         <span class="spacer"></span>
         <span class="health" [class.online]="backend() === 'connected'" [title]="'Backend: ' + backend()">
@@ -48,7 +56,10 @@ interface HealthResponse {
     .brand { color: var(--accent); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
              font-size: 0.85rem; text-decoration: none; }
     nav a { color: var(--muted); text-decoration: none; padding: 0.3rem 0.1rem; }
+    nav { display: flex; gap: 1rem; }
     nav a.active { color: var(--text); border-bottom: 2px solid var(--accent); }
+    .badge { margin-left: 0.3rem; padding: 0 0.45rem; border-radius: 1rem; background: var(--warn);
+             color: var(--bg); font-size: 0.75rem; font-weight: 700; }
     .spacer { flex: 1; }
     .health { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
     .health.online { color: var(--accent); }
@@ -66,6 +77,8 @@ export class App {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly http = inject(HttpClient);
+  private readonly alerts = inject(AlertsService);
+  private readonly alertPollMs = inject(ALERT_POLL_MS);
 
   protected readonly backend = signal('checking…');
 
@@ -73,6 +86,9 @@ export class App {
     const session = this.auth.session();
     return session?.kind === 'authenticated' ? session.username : null;
   });
+
+  /** Alerts nobody has looked at yet, shown as a badge in the navigation. */
+  protected readonly openAlerts = computed(() => this.alerts.status()?.open ?? 0);
 
   constructor() {
     timer(0, 30_000)
@@ -86,6 +102,21 @@ export class App {
         takeUntilDestroyed(inject(DestroyRef)),
       )
       .subscribe((state) => this.backend.set(state));
+
+    // Only ask for alerts while signed in; before that the API answers 401.
+    const alertTicks$ = this.alertPollMs > 0 ? timer(0, this.alertPollMs) : timer(0);
+    toObservable(this.username)
+      .pipe(
+        switchMap((name) =>
+          name
+            ? alertTicks$.pipe(
+                switchMap(() => this.alerts.loadStatus().pipe(catchError(() => EMPTY))),
+              )
+            : EMPTY,
+        ),
+        takeUntilDestroyed(inject(DestroyRef)),
+      )
+      .subscribe();
   }
 
   protected logout(): void {

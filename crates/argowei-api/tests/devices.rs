@@ -24,6 +24,7 @@ fn test_state() -> AppState {
         discovery_timeout_secs: 3,
         offline_after_missed_scans: 3,
         offline_after_secs: 900,
+        baseline_window_secs: 0,
     })
 }
 

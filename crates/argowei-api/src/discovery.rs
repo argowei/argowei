@@ -21,6 +21,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, MissedTickBehavior};
 
+use crate::alerts;
 use crate::config::Settings;
 use crate::events::{self, Severity};
 use crate::presence::PresencePolicy;
@@ -62,6 +63,8 @@ pub struct ScanSummary {
     pub new_addresses: usize,
     /// New (device, address) pairs whose IP was already known on another device.
     pub reassigned_addresses: usize,
+    /// Alerts raised for devices never seen before (none during the baseline).
+    pub new_alerts: usize,
     /// Known devices that answered again after having been marked offline.
     pub came_online: usize,
     /// Devices that missed enough scans, for long enough, to be marked offline.
@@ -105,6 +108,9 @@ pub async fn record_scan(
     .fetch_one(&mut *tx)
     .await?;
 
+    // Devices found while the interface is still being learned do not alert.
+    let baseline = alerts::scan_in_baseline(&mut tx, interface, seen_at).await?;
+
     for host in hosts {
         // Lock the row so concurrent scans of different interfaces cannot
         // both report the same transition.
@@ -136,8 +142,6 @@ pub async fn record_scan(
         .await?;
 
         let ip = host.ip.to_string();
-        let evidence = json!({ "interface": interface, "scan_id": scan_id, "ip": ip });
-
         if device_inserted {
             events::record(
                 &mut *tx,
@@ -145,9 +149,25 @@ pub async fn record_scan(
                 events::DEVICE_DISCOVERED,
                 Severity::Info,
                 Some(device_id),
-                evidence,
+                // Whether the device was learned silently: analyses of how a
+                // network grew should be able to tell baseline from new.
+                json!({
+                    "interface": interface,
+                    "scan_id": scan_id,
+                    "ip": ip,
+                    "baseline": baseline,
+                }),
             )
             .await?;
+
+            if !baseline
+                && alerts::raise_new_device(
+                    &mut tx, device_id, seen_at, interface, scan_id, &host.mac, &ip,
+                )
+                .await?
+            {
+                summary.new_alerts += 1;
+            }
         } else if let Some((false, offline_since)) = previous {
             summary.came_online += 1;
             events::record(
