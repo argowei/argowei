@@ -13,6 +13,8 @@ import {
   DeviceType,
   Evidence,
   Group,
+  NAME_SOURCE_LABELS,
+  NameSource,
   TRUST_LEVELS,
   TrustLevel,
 } from '../../core/models';
@@ -57,7 +59,7 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
             <label for="label">Label</label>
             <input id="label" name="label" maxlength="64" autocomplete="off"
                    [placeholder]="d.name" [ngModel]="form().label" (ngModelChange)="patchForm({ label: $event })" />
-            <p class="hint">Shown instead of the discovered name ({{ d.name }}).</p>
+            <p class="hint">Shown instead of the discovered name ({{ d.name }}{{ nameNote(d) }}).</p>
 
             <label for="group">Group</label>
             <select id="group" name="group" [ngModel]="form().group" (ngModelChange)="patchForm({ group: $event })">
@@ -158,6 +160,35 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
               </table>
             } @else {
               <p class="muted">No addresses recorded.</p>
+            }
+
+            <h2>Discovered names</h2>
+            @if (d.names.length) {
+              <table class="names">
+                <thead>
+                  <tr><th scope="col">Source</th><th scope="col">Name</th><th scope="col">Last answered</th></tr>
+                </thead>
+                <tbody>
+                  @for (entry of d.names; track entry.source) {
+                    <tr>
+                      <td>{{ sourceLabel(entry.source) }}</td>
+                      <td>
+                        {{ entry.name }}
+                        @if (entry.source === d.name_source && entry.name === d.name) {
+                          <span class="pill">shown</span>
+                        }
+                      </td>
+                      <td [title]="entry.last_seen">{{ ago(entry.last_seen) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              <p class="muted hint">
+                When sources disagree, DHCP beats mDNS, NetBIOS and reverse DNS, in that order.
+                @if (d.label) { Your label "{{ d.label }}" is shown instead of all of them. }
+              </p>
+            } @else {
+              <p class="muted">No name learned yet. Devices are asked once they are new and then about once an hour.</p>
             }
           </div>
         </div>
@@ -310,6 +341,15 @@ export class DeviceDetail {
 
   protected kindLabel(item: Evidence): string {
     return KIND_LABELS[item.kind];
+  }
+
+  protected sourceLabel(source: NameSource): string {
+    return NAME_SOURCE_LABELS[source];
+  }
+
+  /** ", from mDNS" when a source named the device, nothing while it is just the MAC. */
+  protected nameNote(device: Device): string {
+    return device.name_source ? `, from ${NAME_SOURCE_LABELS[device.name_source]}` : '';
   }
 
   protected ago(iso: string): string {

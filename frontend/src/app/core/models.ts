@@ -1,6 +1,23 @@
 export const TRUST_LEVELS = ['trusted', 'normal', 'restricted', 'unknown', 'suspicious'] as const;
 export type TrustLevel = (typeof TRUST_LEVELS)[number];
 
+/** Where a discovered name came from. */
+export type NameSource = 'dhcp' | 'mdns' | 'netbios' | 'rdns';
+
+export const NAME_SOURCE_LABELS: Record<NameSource, string> = {
+  dhcp: 'DHCP lease',
+  mdns: 'mDNS',
+  netbios: 'NetBIOS',
+  rdns: 'Reverse DNS',
+};
+
+/** What one source last called the device. */
+export interface DeviceName {
+  source: NameSource;
+  name: string;
+  last_seen: string;
+}
+
 export const DEVICE_TYPES = [
   'smartphone',
   'laptop',
@@ -55,8 +72,10 @@ export interface GroupRef {
 
 export interface Device {
   id: number;
-  /** Name derived by discovery. */
+  /** Name derived by discovery (the MAC until a source names the device). */
   name: string;
+  /** Which source `name` comes from; `null` while it is just the MAC. */
+  name_source: NameSource | null;
   /** Name chosen by the user. */
   label: string | null;
   notes: string;
@@ -79,6 +98,8 @@ export interface Device {
   first_seen: string;
   last_seen: string;
   addresses: DeviceAddress[];
+  /** Every source's latest answer, preferred source first. */
+  names: DeviceName[];
 }
 
 export interface Group {

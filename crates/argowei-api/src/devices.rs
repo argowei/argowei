@@ -2,12 +2,14 @@ use argowei_core::device::{
     AddressSource, Device, DeviceAddress, IpProtocol, TrustLevel, TypeSource,
 };
 use argowei_core::device_type::{Classification, DeviceType};
+use argowei_core::names::NameSource;
 use argowei_core::oui;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Json, Router};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use sqlx::postgres::PgRow;
@@ -41,6 +43,15 @@ impl FromRow<'_, PgRow> for DeviceRow {
             sqlx::Error::Decode(format!("unknown trust level: {trust_level}").into())
         })?;
 
+        let name_source = row
+            .try_get::<Option<String>, _>("name_source")?
+            .map(|value| {
+                NameSource::parse(&value).ok_or_else(|| {
+                    sqlx::Error::Decode(format!("unknown name source: {value}").into())
+                })
+            })
+            .transpose()?;
+
         let type_override = row
             .try_get::<Option<String>, _>("type_override")?
             .map(|value| parse_device_type(&value))
@@ -59,6 +70,7 @@ impl FromRow<'_, PgRow> for DeviceRow {
             Device {
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
+                name_source,
                 label: row.try_get("label")?,
                 notes: row.try_get("notes")?,
                 group_id: row.try_get("group_id")?,
@@ -130,6 +142,16 @@ struct DeviceWithAddresses {
     /// a phone or laptop, but also used by virtual interfaces.
     locally_administered_mac: bool,
     addresses: Vec<DeviceAddress>,
+    /// What each source last called the device, preferred source first. `name`
+    /// is the one chosen for display; a label the user set wins over all of them.
+    names: Vec<DeviceName>,
+}
+
+#[derive(Serialize)]
+struct DeviceName {
+    source: NameSource,
+    name: String,
+    last_seen: DateTime<Utc>,
 }
 
 #[derive(Serialize)]
@@ -139,7 +161,12 @@ struct GroupRef {
 }
 
 impl DeviceWithAddresses {
-    fn new(device: Device, group_name: String, addresses: Vec<DeviceAddress>) -> Self {
+    fn new(
+        device: Device,
+        group_name: String,
+        addresses: Vec<DeviceAddress>,
+        names: Vec<DeviceName>,
+    ) -> Self {
         let mac = oui::lookup(&device.mac_address);
         let group = GroupRef {
             id: device.group_id,
@@ -154,6 +181,7 @@ impl DeviceWithAddresses {
             vendor: mac.vendor,
             locally_administered_mac: mac.locally_administered,
             addresses,
+            names,
         }
     }
 }
@@ -196,7 +224,7 @@ async fn list_with_addresses(
     only: Option<i32>,
 ) -> Result<Vec<DeviceWithAddresses>, sqlx::Error> {
     let devices = sqlx::query_as::<_, DeviceRow>(
-        "SELECT d.id, d.name, d.label, d.notes, d.group_id, g.name AS group_name, \
+        "SELECT d.id, d.name, d.name_source, d.label, d.notes, d.group_id, g.name AS group_name, \
                 d.trust_level, d.type_override, d.inferred_type, d.inferred_confidence, \
                 d.inferred_evidence, d.mac_address, d.is_online, d.first_seen, d.last_seen \
          FROM devices d JOIN device_groups g ON g.id = d.group_id \
@@ -216,6 +244,21 @@ async fn list_with_addresses(
     .fetch_all(db)
     .await?;
 
+    let names: Vec<(i32, NameSource, String, DateTime<Utc>)> = {
+        let rows: Vec<(i32, String, String, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT device_id, source, name, last_seen FROM device_names \
+             WHERE device_id = ANY($1)",
+        )
+        .bind(&device_ids)
+        .fetch_all(db)
+        .await?;
+        rows.into_iter()
+            .filter_map(|(id, source, name, seen)| {
+                NameSource::parse(&source).map(|source| (id, source, name, seen))
+            })
+            .collect()
+    };
+
     Ok(devices
         .into_iter()
         .map(|DeviceRow(device, group_name)| {
@@ -225,7 +268,18 @@ async fn list_with_addresses(
                 .map(|DeviceAddressRow(addr)| addr.clone())
                 .collect();
 
-            DeviceWithAddresses::new(device, group_name, addresses)
+            let mut names: Vec<DeviceName> = names
+                .iter()
+                .filter(|(id, ..)| *id == device.id)
+                .map(|(_, source, name, last_seen)| DeviceName {
+                    source: *source,
+                    name: name.clone(),
+                    last_seen: *last_seen,
+                })
+                .collect();
+            names.sort_by_key(|n| n.source.priority());
+
+            DeviceWithAddresses::new(device, group_name, addresses, names)
         })
         .collect())
 }
@@ -461,6 +515,7 @@ mod tests {
         Device {
             id: 1,
             name: mac.to_owned(),
+            name_source: None,
             label: None,
             notes: String::new(),
             group_id: 1,
@@ -522,6 +577,7 @@ mod tests {
             device("b8:27:eb:12:34:56"),
             "Unassigned".to_owned(),
             vec![],
+            vec![],
         ))
         .unwrap();
 
@@ -536,6 +592,7 @@ mod tests {
             device("0c:0d:0e:33:44:55"),
             "Unassigned".to_owned(),
             vec![],
+            vec![],
         ))
         .unwrap();
 
@@ -548,6 +605,7 @@ mod tests {
         let json = serde_json::to_value(DeviceWithAddresses::new(
             device("1a:56:ce:30:fa:6c"),
             "Unassigned".to_owned(),
+            vec![],
             vec![],
         ))
         .unwrap();

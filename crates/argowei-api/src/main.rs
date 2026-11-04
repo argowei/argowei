@@ -4,6 +4,7 @@ use std::sync::Arc;
 use argowei_api::alerts;
 use argowei_api::config::Settings;
 use argowei_api::discovery::{self, ArpScanner, DiscoveryConfig, InterfaceLocks};
+use argowei_api::names::NamePipeline;
 use argowei_api::routes;
 use argowei_api::state::AppState;
 use tokio::net::TcpListener;
@@ -30,6 +31,7 @@ async fn main() {
         InterfaceLocks::default(),
         state.discovery.clone(),
         DiscoveryConfig::from(&settings),
+        NamePipeline::from_settings(&settings),
     );
     let app = routes::router(state).into_make_service_with_connect_info::<SocketAddr>();
 

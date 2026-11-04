@@ -289,6 +289,52 @@ are listed but disabled until enforcement (gateway or router integration)
 exists. Alerts are not pushed over a WebSocket yet; the dashboard polls every
 15 seconds.
 
+### Device names
+
+A device is called by its MAC address until a source names it. Four sources are
+asked, each on its own and each answer is kept:
+
+| Source | How | Typically answers |
+|---|---|---|
+| `dhcp` | a dnsmasq lease file (`ARGOWEI_DHCP_LEASES_FILE`), by MAC | every device that sent a hostname |
+| `mdns` | a unicast PTR query to the device's port 5353 | Apple devices, Linux with Avahi, printers, TVs |
+| `netbios` | a node status request to the device's port 137 | Windows and Samba hosts |
+| `rdns` | a PTR query to your router's DNS server | whatever the router learned from DHCP |
+
+When sources disagree the order is **DHCP, mDNS, NetBIOS, reverse DNS**; the
+chosen name is the device's `name` and `name_source`, and `names` lists every
+source's answer. A **label you set always wins** and is never touched by
+discovery. The router's own domain is dropped (`iPhone.fritz.box` is `iPhone`),
+and names that say nothing (`localhost`, an address spelled out) or contain
+control characters are discarded. A changed name is recorded as a
+`device.named` event.
+
+Lookups are cheap by design: a device is asked once it is new, then again after
+`ARGOWEI_HOSTNAME_REFRESH_SECS` (default 3600), and sooner (a sixth of that)
+while it has no name. They run after the scan has been stored, in a step of
+their own, on at most `ARGOWEI_HOSTNAME_CONCURRENCY` threads with a
+`ARGOWEI_HOSTNAME_TIMEOUT_MS` limit per query, so a resolver that fails, times
+out or crashes can never fail a discovery run. A device without mDNS refuses at
+once, so it costs one round trip.
+
+```bash
+ARGOWEI_HOSTNAME_SOURCES=dhcp,mdns,netbios,rdns   # any subset; empty turns lookups off
+ARGOWEI_DNS_SERVER=192.168.178.1                  # router; default: local servers in /etc/resolv.conf
+ARGOWEI_DHCP_LEASES_FILE=/var/lib/misc/dnsmasq.leases
+```
+
+To see what your own devices answer, without a scan:
+
+```bash
+cargo run -p argowei-cli -- resolve 192.168.178.1 192.168.178.37 --dns-server 192.168.178.1
+```
+
+Queries only go to private, link-local or loopback addresses. A reverse lookup
+reveals which addresses exist, so DNS servers taken from `resolv.conf` are used
+only if they are on the local network; a public resolver is used only if you set
+it explicitly. Names come from the network and any device can claim any name:
+treat them as labels, not identity. IPv6 is not covered yet.
+
 ### Audit log
 
 Logins, logouts, setup and every other state-changing request are recorded in
