@@ -5,6 +5,8 @@
 
 # Rust
 /target/
+# Leftover build output of an earlier `argowei-backend` crate layout.
+/backend/
 /crates/*/target/
 /crates/argowei-api/app/
 
