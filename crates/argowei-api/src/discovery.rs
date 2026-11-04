@@ -21,6 +21,9 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, MissedTickBehavior};
 
+use argowei_core::device_type::{classify, Signals};
+use argowei_core::oui;
+
 use crate::alerts;
 use crate::config::Settings;
 use crate::events::{self, Severity};
@@ -141,6 +144,8 @@ pub async fn record_scan(
         .fetch_one(&mut *tx)
         .await?;
 
+        classify_device(&mut tx, device_id, &host.mac).await?;
+
         let ip = host.ip.to_string();
         if device_inserted {
             events::record(
@@ -222,6 +227,44 @@ pub async fn record_scan(
 
     tx.commit().await?;
     Ok(summary)
+}
+
+/// Re-infers a device's type from what is known about it and stores the
+/// result. This only ever writes the *inferred* columns: a user's manual
+/// override lives in its own column and is never touched here. Skips the
+/// write when nothing changed, so a scan does not rewrite every row.
+///
+/// Only the vendor and the MAC kind are known so far; open ports, mDNS
+/// services and hostnames feed in as those sources arrive.
+async fn classify_device(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: i32,
+    mac: &str,
+) -> sqlx::Result<()> {
+    let mac_info = oui::lookup(mac);
+    let classification = classify(&Signals {
+        vendor: mac_info.vendor,
+        locally_administered_mac: mac_info.locally_administered,
+        ..Signals::default()
+    });
+    let evidence = serde_json::to_value(&classification.evidence)
+        .map_err(|error| sqlx::Error::Encode(Box::new(error)))?;
+
+    sqlx::query(
+        "UPDATE devices SET inferred_type = $2, inferred_confidence = $3, \
+             inferred_evidence = $4 \
+         WHERE id = $1 \
+           AND (inferred_type, inferred_confidence, inferred_evidence) \
+               IS DISTINCT FROM ($2, $3::smallint, $4::jsonb)",
+    )
+    .bind(device_id)
+    .bind(classification.device_type.as_str())
+    .bind(i16::from(classification.confidence))
+    .bind(evidence)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }
 
 /// Online devices last seen on this interface, but not in the scan just

@@ -4,6 +4,7 @@ import { NO_FILTER, filterDevices, isFiltering, sortDevices } from './device-fil
 const printer = device({
   id: 1,
   label: 'Office printer',
+  device_type: 'printer',
   vendor: 'Brother Industries',
   trust_level: 'normal',
   is_online: true,
@@ -19,6 +20,7 @@ const printer = device({
 const phone = device({
   id: 2,
   name: '1a:56:ce:30:fa:6c',
+  device_type: 'smartphone',
   locally_administered_mac: true,
   trust_level: 'suspicious',
   is_online: false,
@@ -27,6 +29,7 @@ const phone = device({
 const tv = device({
   id: 3,
   label: 'Living room TV',
+  device_type: 'iot',
   vendor: 'Samsung',
   trust_level: 'restricted',
   group_id: 4,
@@ -72,6 +75,16 @@ describe('filterDevices', () => {
     expect(ids(filterDevices(all, { ...NO_FILTER, group: 1 }))).toEqual([2]);
   });
 
+  it('filters by device type', () => {
+    expect(ids(filterDevices(all, { ...NO_FILTER, type: 'printer' }))).toEqual([1]);
+    expect(ids(filterDevices(all, { ...NO_FILTER, type: 'iot' }))).toEqual([3]);
+    expect(filterDevices(all, { ...NO_FILTER, type: 'router' })).toEqual([]);
+  });
+
+  it('also finds a device by its type name in the search box', () => {
+    expect(ids(filterDevices(all, { ...NO_FILTER, query: 'smartphone' }))).toEqual([2]);
+  });
+
   it('combines filters', () => {
     expect(ids(filterDevices(all, { ...NO_FILTER, group: 4, status: 'online', query: 'tv' }))).toEqual([3]);
   });
@@ -82,6 +95,7 @@ describe('isFiltering', () => {
     expect(isFiltering(NO_FILTER)).toBe(false);
     expect(isFiltering({ ...NO_FILTER, query: '  ' })).toBe(false);
     expect(isFiltering({ ...NO_FILTER, trust: 'normal' })).toBe(true);
+    expect(isFiltering({ ...NO_FILTER, type: 'printer' })).toBe(true);
   });
 });
 
@@ -103,6 +117,12 @@ describe('sortDevices', () => {
 
   it('sorts by group name, ties broken by device name', () => {
     expect(ids(sortDevices(all, 'group', 'asc'))).toEqual([3, 1, 2]);
+  });
+
+  it('sorts by the readable type name', () => {
+    // IoT device, Printer, Smartphone
+    expect(ids(sortDevices(all, 'type', 'asc'))).toEqual([3, 1, 2]);
+    expect(ids(sortDevices(all, 'type', 'desc'))).toEqual([2, 1, 3]);
   });
 
   it('sorts by last seen', () => {
