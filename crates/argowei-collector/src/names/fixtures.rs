@@ -11,8 +11,8 @@
 use std::time::Duration;
 
 use super::dns::{parse_ptr_response, DnsError};
-use super::testing::{answer_once, target};
-use super::{HostnameResolver, MdnsResolver, RdnsResolver};
+use super::testing::{answer_once, rdns_on, target};
+use super::{HostnameResolver, MdnsResolver};
 
 /// The id of the recorded queries.
 const ID: u16 = 0x1234;
@@ -121,7 +121,7 @@ fn replay(recorded: &'static str) -> u16 {
 #[test]
 fn the_reverse_dns_resolver_turns_a_recorded_answer_into_a_plain_hostname() {
     let port = replay(ROUTER_FOR_IPHONE);
-    let resolver = RdnsResolver::new(vec![format!("127.0.0.1:{port}").parse().unwrap()]);
+    let resolver = rdns_on(port);
 
     let name = resolver
         .resolve(&target("127.0.0.1"), Duration::from_secs(2))
@@ -137,7 +137,7 @@ fn the_reverse_dns_resolver_turns_a_recorded_answer_into_a_plain_hostname() {
 #[test]
 fn the_router_keeps_its_own_name_whole() {
     let port = replay(ROUTER_FOR_ROUTER);
-    let resolver = RdnsResolver::new(vec![format!("127.0.0.1:{port}").parse().unwrap()]);
+    let resolver = rdns_on(port);
 
     let name = resolver
         .resolve(&target("127.0.0.1"), Duration::from_secs(2))
@@ -149,7 +149,7 @@ fn the_router_keeps_its_own_name_whole() {
 #[test]
 fn a_recorded_no_such_name_gives_no_name() {
     let port = replay(ROUTER_NXDOMAIN);
-    let resolver = RdnsResolver::new(vec![format!("127.0.0.1:{port}").parse().unwrap()]);
+    let resolver = rdns_on(port);
 
     assert_eq!(
         resolver

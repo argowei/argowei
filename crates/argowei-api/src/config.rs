@@ -158,7 +158,7 @@ fn parse_dns_server(value: &str) -> Result<Option<std::net::SocketAddr>, String>
         .or_else(|_| {
             value
                 .parse::<std::net::Ipv4Addr>()
-                .map(|ip| std::net::SocketAddr::new(ip.into(), 53))
+                .map(|ip| std::net::SocketAddr::new(ip.into(), argowei_collector::names::DNS_PORT))
         })
         .map(Some)
         .map_err(|_| format!("\"{value}\" is not an IPv4 address (optionally with :port)"))
