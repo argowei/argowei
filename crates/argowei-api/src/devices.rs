@@ -365,6 +365,18 @@ fn excerpt(text: &str) -> String {
     text.chars().take(AUDIT_EXCERPT_CHARS).collect()
 }
 
+/// What a user can change about a device, read under a row lock: two edits at
+/// once are applied one after the other, and each is audited against the values
+/// it really replaced.
+#[derive(sqlx::FromRow)]
+struct EditableDevice {
+    label: Option<String>,
+    notes: String,
+    group_id: i32,
+    trust_level: String,
+    type_override: Option<String>,
+}
+
 async fn update_device(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -379,13 +391,13 @@ async fn update_device(
     let new_notes = body.notes.as_deref().map(normalize_notes).transpose()?;
 
     let mut tx = state.db.begin().await?;
-    let (old_label, old_notes, old_group, old_trust, old_type): (
-        Option<String>,
-        String,
-        i32,
-        String,
-        Option<String>,
-    ) = sqlx::query_as(
+    let EditableDevice {
+        label: old_label,
+        notes: old_notes,
+        group_id: old_group,
+        trust_level: old_trust,
+        type_override: old_type,
+    } = sqlx::query_as(
         "SELECT label, notes, group_id, trust_level, type_override \
          FROM devices WHERE id = $1 FOR UPDATE",
     )

@@ -179,6 +179,15 @@ struct UpdateGroup {
     defaults: Option<Value>,
 }
 
+/// The columns an update compares against, read under a row lock.
+#[derive(sqlx::FromRow)]
+struct EditableGroup {
+    name: String,
+    description: String,
+    defaults: Value,
+    is_system: bool,
+}
+
 async fn update_group(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -197,15 +206,19 @@ async fn update_group(
     }
 
     let mut tx = state.db.begin().await?;
-    let (old_name, old_description, old_defaults, is_system): (String, String, Value, bool) =
-        sqlx::query_as(
-            "SELECT name, description, defaults, is_system FROM device_groups \
+    let EditableGroup {
+        name: old_name,
+        description: old_description,
+        defaults: old_defaults,
+        is_system,
+    } = sqlx::query_as(
+        "SELECT name, description, defaults, is_system FROM device_groups \
              WHERE id = $1 FOR UPDATE",
-        )
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(ApiError::NotFound("no such group"))?;
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(ApiError::NotFound("no such group"))?;
 
     let name = new_name.unwrap_or_else(|| old_name.clone());
     if is_system && name != old_name {
@@ -278,6 +291,16 @@ async fn update_group(
 
 // --- delete ---------------------------------------------------------------
 
+/// What deleting needs to know, read under a row lock so a device cannot be
+/// moved into the group between the check and the delete without the foreign
+/// key noticing (that race is still caught below).
+#[derive(sqlx::FromRow)]
+struct GroupToDelete {
+    name: String,
+    is_system: bool,
+    device_count: i64,
+}
+
 async fn delete_group(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -285,8 +308,13 @@ async fn delete_group(
     Path(id): Path<i32>,
 ) -> Result<Response, ApiError> {
     let mut tx = state.db.begin().await?;
-    let (name, is_system, devices): (String, bool, i64) = sqlx::query_as(
-        "SELECT name, is_system, (SELECT count(*) FROM devices WHERE group_id = $1) \
+    let GroupToDelete {
+        name,
+        is_system,
+        device_count,
+    } = sqlx::query_as(
+        "SELECT name, is_system, \
+                (SELECT count(*) FROM devices WHERE group_id = $1) AS device_count \
          FROM device_groups WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
@@ -297,7 +325,7 @@ async fn delete_group(
     if is_system {
         return Err(ApiError::Conflict("system groups cannot be deleted"));
     }
-    if devices > 0 {
+    if device_count > 0 {
         return Err(ApiError::Conflict(
             "the group still has devices; move them to another group first",
         ));
