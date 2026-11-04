@@ -10,9 +10,9 @@ import { DeviceList } from './device-list';
 
 const sleep = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const tv = device({ id: 1, label: 'Living room TV', vendor: 'Samsung', trust_level: 'restricted',
+const tv = device({ id: 1, label: 'Living room TV', vendor: 'Samsung', trust_level: 'restricted', device_type: 'iot',
   group_id: 4, group: { id: 4, name: 'IoT' }, last_seen: '2026-01-01T11:00:00Z' });
-const printer = device({ id: 2, label: 'Office printer', trust_level: 'normal',
+const printer = device({ id: 2, label: 'Office printer', trust_level: 'normal', device_type: 'printer',
   last_seen: '2026-01-01T12:00:00Z' });
 const phone = device({ id: 3, label: 'Phone', is_online: false, trust_level: 'suspicious',
   last_seen: '2026-01-01T08:00:00Z' });
@@ -87,6 +87,13 @@ describe('DeviceList', () => {
     expect(r.el.textContent).toContain('3 of 3');
   });
 
+  it('shows the device type in its own column', async () => {
+    const r = await render();
+    const types = Array.from(r.el.querySelectorAll('tbody td.col-type')).map((td) => td.textContent?.trim());
+
+    expect(types).toEqual(['Printer', 'IoT device', 'Unknown']);
+  });
+
   it('shows status and trust as text, not just colour', async () => {
     const r = await render();
     const rows = Array.from(r.el.querySelectorAll('tbody tr')).map((row) => row.textContent);
@@ -136,6 +143,10 @@ describe('DeviceList', () => {
     expect(names(r.el)).toEqual(['Phone']);
 
     choose(r, '#status', 'all');
+    choose(r, '#type', 'printer');
+    expect(names(r.el)).toEqual(['Office printer']);
+
+    choose(r, '#type', 'all');
     choose(r, '#trust', 'restricted');
     expect(names(r.el)).toEqual(['Living room TV']);
 

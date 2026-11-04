@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::device_type::{Classification, DeviceType};
 use crate::names::NameSource;
 
 /// How far a device is trusted. New devices start as `Unknown`; only a user
@@ -39,6 +40,13 @@ impl TrustLevel {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TypeSource {
+    Manual,
+    Inferred,
+}
+
 /// A device is identified by its MAC address. Its IP addresses are tracked
 /// separately in `DeviceAddress`, since a single device can hold several at
 /// once (an IPv4 address via ARP, plus one or more IPv6 addresses via NDP).
@@ -57,6 +65,10 @@ pub struct Device {
     /// The group the device is in. New devices start in "Unassigned".
     pub group_id: i32,
     pub trust_level: TrustLevel,
+    /// The user's decision about what the device is. Wins over `inferred`.
+    pub type_override: Option<DeviceType>,
+    /// What the classifier makes of the device, with the evidence for it.
+    pub inferred: Classification,
     pub mac_address: String,
     pub is_online: bool,
     pub first_seen: DateTime<Utc>,
@@ -68,6 +80,19 @@ impl Device {
     /// otherwise the discovered name.
     pub fn display_name(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.name)
+    }
+
+    /// The type to show: the user's override if set, otherwise the inference.
+    pub fn device_type(&self) -> DeviceType {
+        self.type_override.unwrap_or(self.inferred.device_type)
+    }
+
+    pub fn type_source(&self) -> TypeSource {
+        if self.type_override.is_some() {
+            TypeSource::Manual
+        } else {
+            TypeSource::Inferred
+        }
     }
 }
 
@@ -119,11 +144,40 @@ mod tests {
             notes: String::new(),
             group_id: 1,
             trust_level: TrustLevel::default(),
+            type_override: None,
+            inferred: Classification::default(),
             mac_address: "aa:bb:cc:00:00:01".to_owned(),
             is_online: true,
             first_seen: Utc::now(),
             last_seen: Utc::now(),
         }
+    }
+
+    #[test]
+    fn a_manual_type_wins_over_the_inference() {
+        let mut d = device("x", None);
+        d.inferred = Classification {
+            device_type: DeviceType::Printer,
+            confidence: 70,
+            evidence: vec![],
+        };
+        assert_eq!(
+            (d.device_type(), d.type_source()),
+            (DeviceType::Printer, TypeSource::Inferred)
+        );
+
+        d.type_override = Some(DeviceType::Server);
+        assert_eq!(
+            (d.device_type(), d.type_source()),
+            (DeviceType::Server, TypeSource::Manual)
+        );
+
+        // An explicit "unknown" is a decision too, not a missing override.
+        d.type_override = Some(DeviceType::Unknown);
+        assert_eq!(
+            (d.device_type(), d.type_source()),
+            (DeviceType::Unknown, TypeSource::Manual)
+        );
     }
 
     #[test]

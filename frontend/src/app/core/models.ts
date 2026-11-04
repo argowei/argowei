@@ -18,6 +18,43 @@ export interface DeviceName {
   last_seen: string;
 }
 
+export const DEVICE_TYPES = [
+  'smartphone',
+  'laptop',
+  'server',
+  'iot',
+  'printer',
+  'router',
+  'unknown',
+] as const;
+export type DeviceType = (typeof DEVICE_TYPES)[number];
+
+export const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
+  smartphone: 'Smartphone',
+  laptop: 'Laptop',
+  server: 'Server',
+  iot: 'IoT device',
+  printer: 'Printer',
+  router: 'Router',
+  unknown: 'Unknown',
+};
+
+/** One rule that fired during classification. */
+export interface Evidence {
+  kind: 'vendor' | 'private_mac' | 'hostname' | 'port' | 'mdns';
+  detail: string;
+  type: DeviceType;
+  /** Percent of confidence this one signal gives to `type`. */
+  weight: number;
+}
+
+export interface Classification {
+  device_type: DeviceType;
+  /** 0-100; 0 when the type is unknown. */
+  confidence: number;
+  evidence: Evidence[];
+}
+
 export interface DeviceAddress {
   id: number;
   device_id: number;
@@ -50,6 +87,11 @@ export interface Device {
   locally_administered_mac: boolean;
   is_online: boolean;
   trust_level: TrustLevel;
+  /** The type to show: the override if set, otherwise the inferred type. */
+  device_type: DeviceType;
+  type_source: 'manual' | 'inferred';
+  type_override: DeviceType | null;
+  inferred: Classification;
   /** Every device is in exactly one group; new ones start in "Unassigned". */
   group_id: number;
   group: GroupRef;
@@ -77,4 +119,6 @@ export interface DevicePatch {
   notes?: string;
   group_id?: number;
   trust_level?: TrustLevel;
+  /** A type sets the override; `null` removes it. */
+  type_override?: DeviceType | null;
 }

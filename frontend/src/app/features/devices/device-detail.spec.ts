@@ -15,6 +15,12 @@ const stored = device({
   label: 'Printer',
   notes: 'Hallway',
   trust_level: 'normal',
+  device_type: 'printer',
+  inferred: {
+    device_type: 'printer',
+    confidence: 70,
+    evidence: [{ kind: 'vendor', detail: 'Brother Industries', type: 'printer', weight: 70 }],
+  },
   group_id: 4,
   group: { id: 4, name: 'IoT' },
   vendor: 'Brother Industries',
@@ -26,7 +32,13 @@ const stored = device({
 const groups = [group(1, 'Unassigned'), group(4, 'IoT'), group(5, 'Guest')];
 
 describe('diff', () => {
-  const form = { label: 'Printer', group: 4, trust: 'normal' as const, notes: 'Hallway' };
+  const form = {
+    label: 'Printer',
+    group: 4,
+    trust: 'normal' as const,
+    type: null,
+    notes: 'Hallway',
+  };
 
   it('is empty when nothing changed, ignoring surrounding whitespace', () => {
     expect(diff(stored, form)).toEqual({});
@@ -40,6 +52,15 @@ describe('diff', () => {
 
   it('turns a blank label into null', () => {
     expect(diff(stored, { ...form, label: '  ' })).toEqual({ label: null });
+  });
+
+  it('sets the type override, and removes it with null for automatic', () => {
+    expect(diff(stored, { ...form, type: 'server' })).toEqual({ type_override: 'server' });
+
+    const overridden = { ...stored, type_override: 'server' as const };
+    expect(diff(overridden, { ...form, type: 'server' })).toEqual({});
+    expect(diff(overridden, { ...form, type: null })).toEqual({ type_override: null });
+    expect(diff(overridden, { ...form, type: 'unknown' })).toEqual({ type_override: 'unknown' });
   });
 
   it('moves a device back to Unassigned by its id, never with null', () => {
@@ -149,6 +170,45 @@ describe('DeviceDetail', () => {
     expect(el.textContent).toContain('192.168.1.20');
     expect(el.querySelector<HTMLInputElement>('#label')!.value).toBe('Printer');
     expect(el.querySelector<HTMLTextAreaElement>('#notes')!.value).toBe('Hallway');
+  });
+
+  it('explains the automatic type and offers an override', async () => {
+    const { el } = await render();
+    const options = Array.from(el.querySelectorAll<HTMLOptionElement>('#type option')).map((o) => o.textContent?.trim());
+
+    expect(options[0]).toBe('Automatic (Printer, 70 %)');
+    expect(options).toContain('Router');
+    expect(el.querySelector<HTMLSelectElement>('#type')!.selectedOptions[0].textContent).toContain('Automatic');
+    expect(el.textContent).toContain('70 % sure');
+    const why = el.querySelector('.evidence')!.textContent;
+    expect(why).toContain('Manufacturer');
+    expect(why).toContain('Brother Industries');
+    expect(why).toContain('+70 %');
+  });
+
+  it('says so when there is nothing to base a type on', async () => {
+    const { el } = await render('7', device({ ...stored, device_type: 'unknown', inferred: { device_type: 'unknown', confidence: 0, evidence: [] } }));
+
+    expect(el.querySelector('.evidence')).toBeNull();
+    expect(el.textContent).toContain('Nothing recognisable yet');
+    expect(el.querySelector('#type option')!.textContent?.trim()).toBe('Automatic (unknown)');
+  });
+
+  it('sends the override when a type is picked and shows who set it', async () => {
+    const r = await render();
+
+    const select = r.el.querySelector<HTMLSelectElement>('#type')!;
+    select.selectedIndex = Array.from(select.options).findIndex((o) => o.textContent?.trim() === 'Server');
+    select.dispatchEvent(new Event('change'));
+    r.fixture.detectChanges();
+    saveButton(r.el).click();
+
+    const request = http.expectOne('/api/devices/7');
+    expect(request.request.body).toEqual({ type_override: 'server' });
+    request.flush({ ...stored, type_override: 'server', device_type: 'server', type_source: 'manual' });
+    r.fixture.detectChanges();
+
+    expect(r.el.textContent).toContain('set by you');
   });
 
   it('offers Unassigned as an ordinary group and has no "no group" option', async () => {

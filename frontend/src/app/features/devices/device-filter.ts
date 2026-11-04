@@ -1,16 +1,23 @@
-import { Device, TRUST_LEVELS, TrustLevel } from '../../core/models';
+import { DEVICE_TYPE_LABELS, Device, DeviceType, TRUST_LEVELS, TrustLevel } from '../../core/models';
 
 export interface DeviceFilter {
   query: string;
   status: 'all' | 'online' | 'offline';
   trust: TrustLevel | 'all';
+  type: DeviceType | 'all';
   /** A group id, or `'all'`. */
   group: number | 'all';
 }
 
-export const NO_FILTER: DeviceFilter = { query: '', status: 'all', trust: 'all', group: 'all' };
+export const NO_FILTER: DeviceFilter = {
+  query: '',
+  status: 'all',
+  trust: 'all',
+  type: 'all',
+  group: 'all',
+};
 
-export type SortKey = 'name' | 'status' | 'trust' | 'group' | 'last_seen';
+export type SortKey = 'name' | 'status' | 'type' | 'trust' | 'group' | 'last_seen';
 export type SortDirection = 'asc' | 'desc';
 
 export function isFiltering(filter: DeviceFilter): boolean {
@@ -18,6 +25,7 @@ export function isFiltering(filter: DeviceFilter): boolean {
     filter.query.trim() !== '' ||
     filter.status !== 'all' ||
     filter.trust !== 'all' ||
+    filter.type !== 'all' ||
     filter.group !== 'all'
   );
 }
@@ -30,6 +38,7 @@ function searchText(device: Device): string {
     device.mac_address,
     device.vendor ?? '',
     device.group.name,
+    DEVICE_TYPE_LABELS[device.device_type],
     ...device.addresses.map((address) => address.ip_address),
   ]
     .join(' ')
@@ -43,6 +52,7 @@ export function filterDevices(devices: Device[], filter: DeviceFilter): Device[]
     if (filter.status === 'online' && !device.is_online) return false;
     if (filter.status === 'offline' && device.is_online) return false;
     if (filter.trust !== 'all' && device.trust_level !== filter.trust) return false;
+    if (filter.type !== 'all' && device.device_type !== filter.type) return false;
     if (typeof filter.group === 'number' && device.group_id !== filter.group) return false;
 
     const text = searchText(device);
@@ -59,6 +69,8 @@ function compare(a: Device, b: Device, key: SortKey): number {
       });
     case 'status':
       return Number(b.is_online) - Number(a.is_online);
+    case 'type':
+      return DEVICE_TYPE_LABELS[a.device_type].localeCompare(DEVICE_TYPE_LABELS[b.device_type]);
     case 'trust':
       return TRUST_LEVELS.indexOf(a.trust_level) - TRUST_LEVELS.indexOf(b.trust_level);
     case 'group':

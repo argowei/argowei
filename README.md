@@ -230,6 +230,65 @@ also has one trust level: `trusted`, `normal`, `restricted`, `unknown`
 (default for new devices) or `suspicious`. Discovery never changes either.
 Changes are audit-logged, group changes with the group names.
 
+### Device type
+
+Each device gets a type (`smartphone`, `laptop`, `server`, `iot`, `printer`,
+`router` or `unknown`) inferred by a rule-based classifier in
+`argowei-core::device_type`. It is a pure function: the same signals always give
+the same answer, and it returns every rule that fired with its weight, so the
+dashboard can show *why* a device was called a printer. Signals are the
+manufacturer (from the MAC), a private MAC address, the hostname, open ports and
+mDNS service types. Evidence for one type combines like independent witnesses
+(`1 - Π(1 - w)`), never reaches certainty (capped at 95 %) and is ignored below
+30 %, which yields `unknown`. A signal kind counts once per type.
+
+Today only the manufacturer and the MAC kind are known; hostnames, open ports
+and mDNS feed in as those sources arrive. Devices recorded earlier start as
+`unknown` and are classified the next time a scan sees them.
+
+The inference and the user's decision are stored separately, so re-classifying
+on every scan never overwrites a manual choice:
+
+```bash
+# set a manual type; null goes back to the automatic guess
+curl -X PATCH http://localhost:8000/api/devices/1 -b cookies.txt \
+  -H 'Content-Type: application/json' -d '{"type_override":"printer"}'
+```
+
+`GET /api/devices` returns `device_type` (the type to show), `type_source`
+(`manual` or `inferred`), `type_override` and `inferred` (`device_type`,
+`confidence`, `evidence`). The classifier is a heuristic; MAC addresses and
+hostnames can be wrong or spoofed.
+
+### Alerts for new devices
+
+When a device appears that Argowei has never seen, it raises exactly one alert
+(`device.new`, severity `warning`); the database enforces the "exactly one".
+Alerts have a life cycle, `open` → `acknowledged` → `resolved` (an open alert
+can also be resolved directly), and every step is audit-logged.
+
+A fresh install would otherwise alert for every device already on the network,
+so each interface has a **baseline**: devices found in its first scan are
+learned silently, and so are devices found within the next
+`ARGOWEI_BASELINE_WINDOW_SECS` (default `0`, meaning only the first scan; e.g.
+`86400` keeps learning for a day so devices that were asleep during the first
+scan do not alert). A newly added interface gets its own baseline. The
+dashboard shows a banner while the baseline is pending or still learning, and a
+badge with the open alerts in the navigation.
+
+```bash
+curl 'http://localhost:8000/api/alerts?status=active' -b cookies.txt   # active (default) | open | acknowledged | resolved | all
+curl http://localhost:8000/api/alerts/status -b cookies.txt            # counts + baseline state
+curl -X POST http://localhost:8000/api/alerts/1/acknowledge -b cookies.txt
+curl -X POST http://localhost:8000/api/alerts/1/resolve -b cookies.txt
+```
+
+Each alert carries `suggested_actions`. *Trust* and *Restrict* only classify
+the device (trust level) and then resolve the alert. *Block* and *Quarantine*
+are listed but disabled until enforcement (gateway or router integration)
+exists. Alerts are not pushed over a WebSocket yet; the dashboard polls every
+15 seconds.
+
 ### Device names
 
 A device is called by its MAC address until a source names it. Four sources are
