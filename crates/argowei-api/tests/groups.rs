@@ -2,33 +2,13 @@
 
 mod common;
 
-use std::time::Duration;
-
-use argowei_api::discovery::{record_scan, ObservedHost};
-use argowei_api::presence::PresencePolicy;
+use argowei_api::discovery::record_scan;
 use axum::http::{Method, StatusCode};
 use common::*;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
 const MAC: &str = "aa:bb:cc:00:00:01";
-
-async fn admin(pool: PgPool) -> (Harness, String) {
-    let h = harness(pool).await;
-    setup_admin(&h).await;
-    let cookie = login(&h).await;
-    (h, cookie)
-}
-
-async fn new_device(h: &Harness, mac: &str) -> i32 {
-    sqlx::query_scalar(
-        "INSERT INTO devices (name, mac_address, is_online) VALUES ($1, $1, true) RETURNING id",
-    )
-    .bind(mac)
-    .fetch_one(&h.pool)
-    .await
-    .unwrap()
-}
 
 async fn groups(h: &Harness, cookie: &str) -> Vec<Value> {
     let reply = send(&h.app, Method::GET, "/api/groups", Some(cookie), None).await;
@@ -44,14 +24,6 @@ fn group_id(groups: &[Value], name: &str) -> i64 {
 
 async fn unassigned(h: &Harness, cookie: &str) -> i64 {
     group_id(&groups(h, cookie).await, "Unassigned")
-}
-
-async fn audit_count(h: &Harness, action: &str) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1")
-        .bind(action)
-        .fetch_one(&h.pool)
-        .await
-        .unwrap()
 }
 
 // --- system groups --------------------------------------------------------
@@ -293,7 +265,7 @@ async fn a_group_with_devices_cannot_be_deleted(pool: PgPool) {
     )
     .await;
     let gid = created.body["id"].as_i64().unwrap();
-    let device = new_device(&h, MAC).await;
+    let device = insert_device(&h.pool, MAC).await;
     send(
         &h.app,
         Method::PATCH,
@@ -411,7 +383,7 @@ async fn group_changes_are_audited(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn new_devices_start_unassigned_and_untrusted(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    new_device(&h, MAC).await;
+    insert_device(&h.pool, MAC).await;
     let unassigned = unassigned(&h, &cookie).await;
 
     let list = send(&h.app, Method::GET, "/api/devices", Some(&cookie), None).await;
@@ -427,7 +399,7 @@ async fn new_devices_start_unassigned_and_untrusted(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_device_has_one_group_and_moving_it_updates_both_counts(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    let device = new_device(&h, MAC).await;
+    let device = insert_device(&h.pool, MAC).await;
     let all = groups(&h, &cookie).await;
     let (iot, guest) = (group_id(&all, "IoT"), group_id(&all, "Guest"));
     let uri = format!("/api/devices/{device}");
@@ -487,7 +459,7 @@ async fn a_device_has_one_group_and_moving_it_updates_both_counts(pool: PgPool) 
 #[sqlx::test(migrations = "../../migrations")]
 async fn invalid_group_or_trust_values_are_rejected_and_change_nothing(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    let device = new_device(&h, MAC).await;
+    let device = insert_device(&h.pool, MAC).await;
     let uri = format!("/api/devices/{device}");
     send(
         &h.app,
@@ -531,7 +503,7 @@ async fn invalid_group_or_trust_values_are_rejected_and_change_nothing(pool: PgP
 #[sqlx::test(migrations = "../../migrations")]
 async fn group_and_trust_changes_are_audited_with_names(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    let device = new_device(&h, MAC).await;
+    let device = insert_device(&h.pool, MAC).await;
     let iot = group_id(&groups(&h, &cookie).await, "IoT");
 
     send(
@@ -562,20 +534,13 @@ async fn group_and_trust_changes_are_audited_with_names(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn discovery_never_changes_group_or_trust(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    let policy = PresencePolicy {
-        offline_after_missed_scans: 3,
-        offline_after: Duration::from_secs(900),
-    };
-    let host = ObservedHost {
-        ip: "192.168.1.10".parse().unwrap(),
-        mac: MAC.to_owned(),
-    };
+    let host = host(10, MAC);
     record_scan(
         &h.pool,
         "eth0",
         std::slice::from_ref(&host),
         chrono::Utc::now(),
-        &policy,
+        &POLICY,
     )
     .await
     .unwrap();
@@ -598,7 +563,7 @@ async fn discovery_never_changes_group_or_trust(pool: PgPool) {
     .await;
     for minutes in [5, 10] {
         let at = chrono::Utc::now() + chrono::Duration::minutes(minutes);
-        record_scan(&h.pool, "eth0", std::slice::from_ref(&host), at, &policy)
+        record_scan(&h.pool, "eth0", std::slice::from_ref(&host), at, &POLICY)
             .await
             .unwrap();
     }

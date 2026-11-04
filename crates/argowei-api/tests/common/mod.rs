@@ -10,10 +10,14 @@ use axum::body::Body;
 use axum::http::header::{CONTENT_TYPE, COOKIE, ORIGIN, SET_COOKIE};
 use axum::http::{Method, Request, StatusCode};
 use axum::Router;
+use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use tower::ServiceExt;
+
+use argowei_api::discovery::{record_scan, ObservedHost};
+use argowei_api::presence::PresencePolicy;
 
 pub const PASSWORD: &str = "correct horse battery";
 
@@ -143,6 +147,105 @@ pub async fn login(h: &Harness) -> String {
 pub async fn audit_actions(pool: &PgPool) -> Vec<(String, String, String)> {
     sqlx::query_as("SELECT actor, action, outcome FROM audit_log ORDER BY id")
         .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// A fresh app with the admin set up and logged in; returns the session cookie.
+pub async fn admin(pool: PgPool) -> (Harness, String) {
+    let h = harness(pool).await;
+    setup_admin(&h).await;
+    let cookie = login(&h).await;
+    (h, cookie)
+}
+
+// --- discovery ------------------------------------------------------------
+
+/// The presence policy the tests scan with: offline after 3 missed scans
+/// and 15 minutes.
+pub const POLICY: PresencePolicy = PresencePolicy {
+    offline_after_missed_scans: 3,
+    offline_after: std::time::Duration::from_secs(900),
+};
+
+/// A fixed point in time, so tests can scan at `t0() + minutes(n)`.
+pub fn t0() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap()
+}
+
+pub fn minutes(n: i64) -> ChronoDuration {
+    ChronoDuration::minutes(n)
+}
+
+/// A host at `192.168.1.<last_octet>`.
+pub fn host(last_octet: u8, mac: &str) -> ObservedHost {
+    ObservedHost {
+        ip: format!("192.168.1.{last_octet}").parse().unwrap(),
+        mac: mac.to_owned(),
+    }
+}
+
+/// Stores a scan of `eth0` that found `hosts`.
+pub async fn scan(h: &Harness, hosts: &[ObservedHost], at: DateTime<Utc>) {
+    record_scan(&h.pool, "eth0", hosts, at, &POLICY)
+        .await
+        .unwrap();
+}
+
+/// Inserts a device directly, without a scan; returns its id.
+pub async fn insert_device(pool: &PgPool, mac: &str) -> i32 {
+    sqlx::query_scalar(
+        "INSERT INTO devices (name, mac_address, is_online) VALUES ($1, $1, true) RETURNING id",
+    )
+    .bind(mac)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+// --- reading back -----------------------------------------------------------
+
+/// The device with this MAC, as `GET /api/devices` lists it.
+pub async fn device_json(h: &Harness, cookie: &str, mac: &str) -> Value {
+    let list = send(&h.app, Method::GET, "/api/devices", Some(cookie), None).await;
+    list.body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["mac_address"] == mac)
+        .unwrap_or_else(|| panic!("{mac} not listed"))
+        .clone()
+}
+
+pub async fn patch_device(
+    h: &Harness,
+    cookie: &str,
+    id: impl std::fmt::Display,
+    body: Value,
+) -> Reply {
+    send(
+        &h.app,
+        Method::PATCH,
+        &format!("/api/devices/{id}"),
+        Some(cookie),
+        Some(body),
+    )
+    .await
+}
+
+/// Rows in `table`.
+pub async fn count(pool: &PgPool, table: &str) -> i64 {
+    sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Audit entries with this action.
+pub async fn audit_count(h: &Harness, action: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1")
+        .bind(action)
+        .fetch_one(&h.pool)
         .await
         .unwrap()
 }

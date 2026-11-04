@@ -7,53 +7,25 @@ use std::time::Duration;
 
 use argowei_api::alerts::apply_baseline_window;
 use argowei_api::discovery::{record_scan, ObservedHost};
-use argowei_api::presence::PresencePolicy;
 use axum::http::{Method, StatusCode};
-use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use common::*;
 use serde_json::{json, Value};
 use sqlx::PgPool;
-
-const POLICY: PresencePolicy = PresencePolicy {
-    offline_after_missed_scans: 3,
-    offline_after: Duration::from_secs(900),
-};
 
 /// A real Brother prefix, so the alert can name a manufacturer.
 const PRINTER: &str = "00:80:77:aa:bb:01";
 const PHONE: &str = "1a:56:ce:aa:bb:02";
 const LAPTOP: &str = "3c:22:fb:aa:bb:03";
 
-fn t0() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap()
-}
-
 fn hours(n: i64) -> ChronoDuration {
     ChronoDuration::hours(n)
-}
-
-fn host(last_octet: u8, mac: &str) -> ObservedHost {
-    ObservedHost {
-        ip: format!("192.168.1.{last_octet}").parse().unwrap(),
-        mac: mac.to_owned(),
-    }
 }
 
 async fn scan_on(h: &Harness, interface: &str, hosts: &[ObservedHost], at: DateTime<Utc>) {
     record_scan(&h.pool, interface, hosts, at, &POLICY)
         .await
         .unwrap();
-}
-
-async fn scan(h: &Harness, hosts: &[ObservedHost], at: DateTime<Utc>) {
-    scan_on(h, "eth0", hosts, at).await;
-}
-
-async fn admin(pool: PgPool) -> (Harness, String) {
-    let h = harness(pool).await;
-    setup_admin(&h).await;
-    let cookie = login(&h).await;
-    (h, cookie)
 }
 
 async fn alerts(h: &Harness, cookie: &str, query: &str) -> Value {
@@ -86,14 +58,6 @@ async fn status(h: &Harness, cookie: &str) -> Value {
     )
     .await
     .body
-}
-
-async fn audit_count(h: &Harness, action: &str) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1")
-        .bind(action)
-        .fetch_one(&h.pool)
-        .await
-        .unwrap()
 }
 
 /// A network that was scanned once (the baseline) and then gained a printer.

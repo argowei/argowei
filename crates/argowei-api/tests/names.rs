@@ -7,39 +7,18 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use argowei_api::discovery::{record_scan, ObservedHost};
 use argowei_api::names::{after_scan, resolve_pending, NameLookup, NamePipeline, NamesError};
-use argowei_api::presence::PresencePolicy;
 use argowei_collector::names::{NameSource, ResolvedName, Target, TargetNames};
 use axum::http::{Method, StatusCode};
-use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use common::*;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
-const POLICY: PresencePolicy = PresencePolicy {
-    offline_after_missed_scans: 3,
-    offline_after: Duration::from_secs(900),
-};
 const REFRESH: Duration = Duration::from_secs(3600);
 
 const PHONE: &str = "aa:bb:cc:00:00:01";
 const PRINTER: &str = "aa:bb:cc:00:00:02";
-
-fn t0() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap()
-}
-
-fn minutes(n: i64) -> ChronoDuration {
-    ChronoDuration::minutes(n)
-}
-
-fn host(last_octet: u8, mac: &str) -> ObservedHost {
-    ObservedHost {
-        ip: format!("192.168.1.{last_octet}").parse().unwrap(),
-        mac: mac.to_owned(),
-    }
-}
 
 type Answer = Box<dyn Fn(&Target) -> TargetNames + Send + Sync>;
 
@@ -94,30 +73,6 @@ fn pipeline(lookup: Arc<FakeLookup>) -> NamePipeline {
     }
 }
 
-async fn scan(h: &Harness, hosts: &[ObservedHost], at: DateTime<Utc>) {
-    record_scan(&h.pool, "eth0", hosts, at, &POLICY)
-        .await
-        .unwrap();
-}
-
-async fn admin(pool: PgPool) -> (Harness, String) {
-    let h = harness(pool).await;
-    setup_admin(&h).await;
-    let cookie = login(&h).await;
-    (h, cookie)
-}
-
-async fn device(h: &Harness, cookie: &str, mac: &str) -> Value {
-    let list = send(&h.app, Method::GET, "/api/devices", Some(cookie), None).await;
-    list.body
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|d| d["mac_address"] == mac)
-        .unwrap()
-        .clone()
-}
-
 async fn resolve(
     h: &Harness,
     lookup: &Arc<FakeLookup>,
@@ -135,17 +90,17 @@ async fn a_new_device_is_named_after_its_scan(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
     scan(&h, &[host(5, PHONE)], t0()).await;
     assert_eq!(
-        device(&h, &cookie, PHONE).await["name"],
+        device_json(&h, &cookie, PHONE).await["name"],
         PHONE,
         "starts as the MAC"
     );
-    assert!(device(&h, &cookie, PHONE).await["name_source"].is_null());
+    assert!(device_json(&h, &cookie, PHONE).await["name_source"].is_null());
 
     let lookup = FakeLookup::new(|t| answers(t, &[(NameSource::Mdns, "Annas-iPhone")]));
     let summary = resolve(&h, &lookup, t0()).await;
 
     assert_eq!((summary.looked_up, summary.renamed), (1, 1));
-    let d = device(&h, &cookie, PHONE).await;
+    let d = device_json(&h, &cookie, PHONE).await;
     assert_eq!(d["name"], "Annas-iPhone");
     assert_eq!(d["name_source"], "mdns");
     assert_eq!(
@@ -193,7 +148,7 @@ async fn when_sources_disagree_the_highest_priority_wins_and_all_answers_are_kep
     });
     resolve(&h, &lookup, t0()).await;
 
-    let d = device(&h, &cookie, PHONE).await;
+    let d = device_json(&h, &cookie, PHONE).await;
     assert_eq!(
         (d["name"].as_str(), d["name_source"].as_str()),
         (Some("anna"), Some("dhcp"))
@@ -220,7 +175,9 @@ async fn when_sources_disagree_the_highest_priority_wins_and_all_answers_are_kep
 async fn a_manual_label_always_wins_over_discovered_names(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
     scan(&h, &[host(5, PHONE)], t0()).await;
-    let id = device(&h, &cookie, PHONE).await["id"].as_i64().unwrap();
+    let id = device_json(&h, &cookie, PHONE).await["id"]
+        .as_i64()
+        .unwrap();
     send(
         &h.app,
         Method::PATCH,
@@ -244,7 +201,7 @@ async fn a_manual_label_always_wins_over_discovered_names(pool: PgPool) {
     let renamed = FakeLookup::new(|t| answers(t, &[(NameSource::Dhcp, "annas-new-phone")]));
     resolve(&h, &renamed, t0() + ChronoDuration::hours(2)).await;
 
-    let d = device(&h, &cookie, PHONE).await;
+    let d = device_json(&h, &cookie, PHONE).await;
     assert_eq!(d["label"], "Mein Handy");
     assert_eq!(d["display_name"], "Mein Handy");
     assert_eq!(
@@ -273,7 +230,10 @@ async fn a_changed_name_updates_and_is_recorded_once(pool: PgPool) {
     scan(&h, &[host(5, PHONE)], again).await;
     resolve(&h, &renamed, again).await;
 
-    assert_eq!(device(&h, &cookie, PHONE).await["name"], "Annas-iPhone");
+    assert_eq!(
+        device_json(&h, &cookie, PHONE).await["name"],
+        "Annas-iPhone"
+    );
     let events: Vec<Value> =
         sqlx::query_scalar("SELECT payload FROM events WHERE type = 'device.named' ORDER BY id")
             .fetch_all(&h.pool)
@@ -327,7 +287,7 @@ async fn a_source_that_stops_answering_keeps_its_last_name(pool: PgPool) {
     )
     .await;
 
-    let d = device(&h, &cookie, PHONE).await;
+    let d = device_json(&h, &cookie, PHONE).await;
     assert_eq!(
         d["name"], "Annas-iPhone",
         "a sleeping phone does not lose its name"
@@ -353,7 +313,7 @@ async fn names_from_the_network_are_checked_before_they_are_stored(pool: PgPool)
     });
     resolve(&h, &lookup, t0()).await;
 
-    let d = device(&h, &cookie, PHONE).await;
+    let d = device_json(&h, &cookie, PHONE).await;
     assert_eq!(
         d["names"].as_array().unwrap().len(),
         1,
@@ -386,7 +346,7 @@ async fn resolver_failures_leave_the_device_alone_and_are_counted(pool: PgPool) 
         (summary.looked_up, summary.renamed, summary.resolver_errors),
         (1, 0, 2)
     );
-    assert_eq!(device(&h, &cookie, PHONE).await["name"], PHONE);
+    assert_eq!(device_json(&h, &cookie, PHONE).await["name"], PHONE);
     let checked: bool = sqlx::query_scalar("SELECT names_checked_at IS NOT NULL FROM devices")
         .fetch_one(&h.pool)
         .await
@@ -422,7 +382,7 @@ async fn a_lookup_that_panics_does_not_disturb_the_scan_or_the_database(pool: Pg
     // ... and the step the scheduler actually runs swallows it.
     after_scan(&h.pool, &crashing, "eth0").await;
 
-    assert_eq!(device(&h, &cookie, PHONE).await["name"], PHONE);
+    assert_eq!(device_json(&h, &cookie, PHONE).await["name"], PHONE);
     let scans: i64 = sqlx::query_scalar("SELECT count(*) FROM discovery_scans")
         .fetch_one(&h.pool)
         .await
@@ -527,7 +487,7 @@ async fn an_unnamed_device_reports_no_source_and_no_names(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
     scan(&h, &[host(5, PHONE)], t0()).await;
 
-    let d = device(&h, &cookie, PHONE).await;
+    let d = device_json(&h, &cookie, PHONE).await;
 
     assert!(d["name_source"].is_null());
     assert_eq!(d["names"], json!([]));

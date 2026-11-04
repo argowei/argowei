@@ -3,11 +3,7 @@
 
 mod common;
 
-use std::time::Duration;
-
-use argowei_api::discovery::{record_scan, ObservedHost};
-use argowei_api::presence::PresencePolicy;
-use axum::http::{Method, StatusCode};
+use axum::http::StatusCode;
 use chrono::Utc;
 use common::*;
 use serde_json::{json, Value};
@@ -22,53 +18,6 @@ const PRIVATE_MAC: &str = "1a:56:ce:aa:bb:04";
 /// Not in the registry.
 const UNLISTED_MAC: &str = "0c:0d:0e:aa:bb:05";
 
-const POLICY: PresencePolicy = PresencePolicy {
-    offline_after_missed_scans: 3,
-    offline_after: Duration::from_secs(900),
-};
-
-fn host(last_octet: u8, mac: &str) -> ObservedHost {
-    ObservedHost {
-        ip: format!("192.168.1.{last_octet}").parse().unwrap(),
-        mac: mac.to_owned(),
-    }
-}
-
-async fn scan(h: &Harness, hosts: &[ObservedHost]) {
-    record_scan(&h.pool, "eth0", hosts, Utc::now(), &POLICY)
-        .await
-        .unwrap();
-}
-
-async fn admin(pool: PgPool) -> (Harness, String) {
-    let h = harness(pool).await;
-    setup_admin(&h).await;
-    let cookie = login(&h).await;
-    (h, cookie)
-}
-
-async fn device_json(h: &Harness, cookie: &str, mac: &str) -> Value {
-    let list = send(&h.app, Method::GET, "/api/devices", Some(cookie), None).await;
-    list.body
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|d| d["mac_address"] == mac)
-        .unwrap_or_else(|| panic!("{mac} not listed"))
-        .clone()
-}
-
-async fn patch(h: &Harness, cookie: &str, id: i64, body: Value) -> Reply {
-    send(
-        &h.app,
-        Method::PATCH,
-        &format!("/api/devices/{id}"),
-        Some(cookie),
-        Some(body),
-    )
-    .await
-}
-
 #[sqlx::test(migrations = "../../migrations")]
 async fn scans_infer_a_type_with_confidence_and_evidence(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
@@ -79,6 +28,7 @@ async fn scans_infer_a_type_with_confidence_and_evidence(pool: PgPool) {
             host(11, PI_MAC),
             host(12, ROUTER_MAC),
         ],
+        Utc::now(),
     )
     .await;
 
@@ -113,7 +63,12 @@ async fn scans_infer_a_type_with_confidence_and_evidence(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn weak_or_missing_evidence_stays_unknown_but_is_explained(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    scan(&h, &[host(13, PRIVATE_MAC), host(14, UNLISTED_MAC)]).await;
+    scan(
+        &h,
+        &[host(13, PRIVATE_MAC), host(14, UNLISTED_MAC)],
+        Utc::now(),
+    )
+    .await;
 
     let private = device_json(&h, &cookie, PRIVATE_MAC).await;
     assert_eq!(private["device_type"], "unknown");
@@ -139,7 +94,7 @@ async fn devices_recorded_before_classification_existed_get_classified_when_seen
         "unknown"
     );
 
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
 
     assert_eq!(
         device_json(&h, &cookie, PRINTER_MAC).await["device_type"],
@@ -150,12 +105,12 @@ async fn devices_recorded_before_classification_existed_get_classified_when_seen
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_manual_override_wins_and_leaves_the_inference_visible(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
     let id = device_json(&h, &cookie, PRINTER_MAC).await["id"]
         .as_i64()
         .unwrap();
 
-    let reply = patch(&h, &cookie, id, json!({ "type_override": "server" })).await;
+    let reply = patch_device(&h, &cookie, id, json!({ "type_override": "server" })).await;
 
     assert_eq!(reply.status, StatusCode::OK);
     assert_eq!(reply.body["device_type"], "server");
@@ -170,19 +125,19 @@ async fn a_manual_override_wins_and_leaves_the_inference_visible(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn re_classification_never_overwrites_the_manual_override(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
     let id = device_json(&h, &cookie, PRINTER_MAC).await["id"]
         .as_i64()
         .unwrap();
-    patch(&h, &cookie, id, json!({ "type_override": "iot" })).await;
+    patch_device(&h, &cookie, id, json!({ "type_override": "iot" })).await;
 
     // Make the stored inference stale so the next scan really changes it.
     sqlx::query("UPDATE devices SET inferred_type = 'router', inferred_confidence = 99")
         .execute(&h.pool)
         .await
         .unwrap();
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
 
     let device = device_json(&h, &cookie, PRINTER_MAC).await;
     assert_eq!(
@@ -198,13 +153,13 @@ async fn re_classification_never_overwrites_the_manual_override(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn removing_the_override_brings_the_inference_back(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
     let id = device_json(&h, &cookie, PRINTER_MAC).await["id"]
         .as_i64()
         .unwrap();
-    patch(&h, &cookie, id, json!({ "type_override": "laptop" })).await;
+    patch_device(&h, &cookie, id, json!({ "type_override": "laptop" })).await;
 
-    let cleared = patch(&h, &cookie, id, json!({ "type_override": null })).await;
+    let cleared = patch_device(&h, &cookie, id, json!({ "type_override": null })).await;
 
     assert_eq!(cleared.status, StatusCode::OK);
     assert_eq!(cleared.body["device_type"], "printer");
@@ -215,12 +170,12 @@ async fn removing_the_override_brings_the_inference_back(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn an_explicit_unknown_is_a_decision_and_an_absent_field_changes_nothing(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
     let id = device_json(&h, &cookie, PRINTER_MAC).await["id"]
         .as_i64()
         .unwrap();
 
-    let unknown = patch(&h, &cookie, id, json!({ "type_override": "unknown" })).await;
+    let unknown = patch_device(&h, &cookie, id, json!({ "type_override": "unknown" })).await;
     assert_eq!(
         (
             unknown.body["device_type"].as_str(),
@@ -229,7 +184,7 @@ async fn an_explicit_unknown_is_a_decision_and_an_absent_field_changes_nothing(p
         (Some("unknown"), Some("manual"))
     );
 
-    let other_field = patch(&h, &cookie, id, json!({ "notes": "hallway" })).await;
+    let other_field = patch_device(&h, &cookie, id, json!({ "notes": "hallway" })).await;
     assert_eq!(
         other_field.body["type_override"], "unknown",
         "untouched by an unrelated edit"
@@ -239,13 +194,13 @@ async fn an_explicit_unknown_is_a_decision_and_an_absent_field_changes_nothing(p
 #[sqlx::test(migrations = "../../migrations")]
 async fn invalid_types_are_rejected_and_change_nothing(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
     let id = device_json(&h, &cookie, PRINTER_MAC).await["id"]
         .as_i64()
         .unwrap();
 
     for value in [json!("toaster"), json!("Printer"), json!(""), json!(7)] {
-        let reply = patch(&h, &cookie, id, json!({ "type_override": value.clone() })).await;
+        let reply = patch_device(&h, &cookie, id, json!({ "type_override": value.clone() })).await;
         assert!(
             reply.status == StatusCode::BAD_REQUEST
                 || reply.status == StatusCode::UNPROCESSABLE_ENTITY,
@@ -262,13 +217,13 @@ async fn invalid_types_are_rejected_and_change_nothing(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn override_changes_are_audited(pool: PgPool) {
     let (h, cookie) = admin(pool).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
     let id = device_json(&h, &cookie, PRINTER_MAC).await["id"]
         .as_i64()
         .unwrap();
-    patch(&h, &cookie, id, json!({ "type_override": "server" })).await;
-    patch(&h, &cookie, id, json!({ "type_override": "server" })).await; // no change
-    patch(&h, &cookie, id, json!({ "type_override": null })).await;
+    patch_device(&h, &cookie, id, json!({ "type_override": "server" })).await;
+    patch_device(&h, &cookie, id, json!({ "type_override": "server" })).await; // no change
+    patch_device(&h, &cookie, id, json!({ "type_override": null })).await;
 
     let payloads: Vec<Value> = sqlx::query_scalar(
         "SELECT payload FROM audit_log WHERE action = 'device.update' ORDER BY id",
@@ -291,7 +246,7 @@ async fn override_changes_are_audited(pool: PgPool) {
 #[sqlx::test(migrations = "../../migrations")]
 async fn the_database_rejects_a_type_it_does_not_know(pool: PgPool) {
     let (h, _) = admin(pool).await;
-    scan(&h, &[host(10, PRINTER_MAC)]).await;
+    scan(&h, &[host(10, PRINTER_MAC)], Utc::now()).await;
 
     let override_bad = sqlx::query("UPDATE devices SET type_override = 'toaster'")
         .execute(&h.pool)

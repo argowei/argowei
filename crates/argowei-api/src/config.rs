@@ -1,5 +1,5 @@
-//! Settings from environment variables. Every variable, with its default and
-//! meaning, is listed in `docs/CONFIGURATION.md`.
+//! Settings from environment variables. The defaults are in
+//! [`Settings::from_env`]; `.env.example` shows the common ones.
 
 /// Application settings.
 ///
