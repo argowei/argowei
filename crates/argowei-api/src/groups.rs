@@ -18,6 +18,7 @@ use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
 use crate::error::{is_foreign_key_violation, is_unique_violation, ApiError};
 use crate::state::AppState;
+use crate::validate;
 
 const MAX_NAME_CHARS: usize = 64;
 const MAX_DESCRIPTION_CHARS: usize = 500;
@@ -59,36 +60,11 @@ async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<Group>>, 
 // --- validation -----------------------------------------------------------
 
 fn normalize_name(raw: &str) -> Result<String, ApiError> {
-    let name = raw.trim();
-    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "name must be 1-{MAX_NAME_CHARS} characters"
-        )));
-    }
-    if name.chars().any(char::is_control) {
-        return Err(ApiError::BadRequest(
-            "name must be a single line without control characters".into(),
-        ));
-    }
-    Ok(name.to_owned())
+    validate::single_line(raw, "name", 1..=MAX_NAME_CHARS)
 }
 
 fn normalize_description(raw: &str) -> Result<String, ApiError> {
-    let text = raw.trim();
-    if text.chars().count() > MAX_DESCRIPTION_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "description must be at most {MAX_DESCRIPTION_CHARS} characters"
-        )));
-    }
-    if text
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-    {
-        return Err(ApiError::BadRequest(
-            "description must not contain control characters".into(),
-        ));
-    }
-    Ok(text.to_owned())
+    validate::multi_line(raw, "description", 0..=MAX_DESCRIPTION_CHARS)
 }
 
 fn validate_defaults(value: &Value) -> Result<(), ApiError> {
@@ -360,8 +336,8 @@ async fn delete_group(
 mod tests {
     use super::*;
 
-    fn bad(result: Result<impl std::fmt::Debug, ApiError>) {
-        assert!(matches!(result, Err(ApiError::BadRequest(_))), "{result:?}");
+    fn bad<T: std::fmt::Debug>(result: Result<T, ApiError>) {
+        crate::validate::bad_request(result);
     }
 
     #[test]

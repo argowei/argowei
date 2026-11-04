@@ -18,6 +18,7 @@ use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
 use crate::error::{is_foreign_key_violation, ApiError};
 use crate::state::AppState;
+use crate::validate;
 
 const MAX_LABEL_CHARS: usize = 64;
 const MAX_NOTES_CHARS: usize = 2000;
@@ -323,42 +324,14 @@ where
     Option::<T>::deserialize(d).map(Some)
 }
 
-/// Trims; a blank label means "no label". Single line, no control characters.
+/// A blank label means "no label", so the discovered name shows again.
 fn normalize_label(raw: &str) -> Result<Option<String>, ApiError> {
-    let label = raw.trim();
-    if label.is_empty() {
-        return Ok(None);
-    }
-    if label.chars().count() > MAX_LABEL_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "label must be at most {MAX_LABEL_CHARS} characters"
-        )));
-    }
-    if label.chars().any(char::is_control) {
-        return Err(ApiError::BadRequest(
-            "label must be a single line without control characters".into(),
-        ));
-    }
-    Ok(Some(label.to_owned()))
+    let label = validate::single_line(raw, "label", 0..=MAX_LABEL_CHARS)?;
+    Ok((!label.is_empty()).then_some(label))
 }
 
-/// Trims; may span several lines, but no other control characters.
 fn normalize_notes(raw: &str) -> Result<String, ApiError> {
-    let notes = raw.trim();
-    if notes.chars().count() > MAX_NOTES_CHARS {
-        return Err(ApiError::BadRequest(format!(
-            "notes must be at most {MAX_NOTES_CHARS} characters"
-        )));
-    }
-    if notes
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-    {
-        return Err(ApiError::BadRequest(
-            "notes must not contain control characters".into(),
-        ));
-    }
-    Ok(notes.to_owned())
+    validate::multi_line(raw, "notes", 0..=MAX_NOTES_CHARS)
 }
 
 fn excerpt(text: &str) -> String {
@@ -513,6 +486,7 @@ async fn update_device(
 
 #[cfg(test)]
 mod tests {
+    use crate::validate::bad_request;
     use chrono::Utc;
 
     use super::*;
@@ -532,13 +506,6 @@ mod tests {
             is_online: true,
             first_seen: Utc::now(),
             last_seen: Utc::now(),
-        }
-    }
-
-    fn bad_request(result: Result<impl std::fmt::Debug, ApiError>) -> String {
-        match result {
-            Err(ApiError::BadRequest(message)) => message,
-            other => panic!("expected a validation error, got {other:?}"),
         }
     }
 

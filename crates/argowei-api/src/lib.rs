@@ -11,3 +11,4 @@ pub mod names;
 pub mod presence;
 pub mod routes;
 pub mod state;
+pub mod validate;
