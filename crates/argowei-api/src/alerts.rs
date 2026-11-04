@@ -19,9 +19,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
+use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
-use crate::error::{db_error, ApiError};
+use crate::error::ApiError;
 use crate::state::AppState;
 
 pub const NEW_DEVICE: &str = "device.new";
@@ -325,8 +325,7 @@ async fn list(
     .bind(query.before)
     .bind(limit + 1)
     .fetch_all(&state.db)
-    .await
-    .map_err(db_error)?;
+    .await?;
 
     let next_before = if rows.len() as i64 > limit {
         rows.truncate(limit as usize);
@@ -354,14 +353,12 @@ async fn status(State(state): State<AppState>) -> Result<Json<StatusResponse>, A
                 count(*) FILTER (WHERE status = 'acknowledged') FROM alerts",
     )
     .fetch_one(&state.db)
-    .await
-    .map_err(db_error)?;
+    .await?;
 
     let started: Vec<DateTime<Utc>> = sqlx::query_scalar("SELECT started_at FROM baselines")
         .fetch_all(&state.db)
-        .await
-        .map_err(db_error)?;
-    let window = baseline_window(&state.db).await.map_err(db_error)?;
+        .await?;
+    let window = baseline_window(&state.db).await?;
 
     Ok(Json(StatusResponse {
         open,
@@ -403,13 +400,12 @@ async fn transition(
     Path(id): Path<i64>,
     step: Transition,
 ) -> Result<Response, ApiError> {
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     let (current, kind, device_id): (String, String, Option<i32>) =
         sqlx::query_as("SELECT status, type, device_id FROM alerts WHERE id = $1 FOR UPDATE")
             .bind(id)
             .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_error)?
+            .await?
             .ok_or(ApiError::NotFound("no such alert"))?;
 
     let (action, new_status) = match (step, current.as_str()) {
@@ -435,8 +431,7 @@ async fn transition(
             .bind(id)
             .bind(&user.username)
             .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
+            .await?;
         audit::record(
             &mut *tx,
             AuditEntry::new(&user.username, action, Outcome::Success)
@@ -444,21 +439,23 @@ async fn transition(
                 .remote_addr(meta.remote_addr)
                 .payload(json!({ "type": kind, "device_id": device_id, "from": current })),
         )
-        .await
-        .map_err(db_error)?;
+        .await?;
     }
-    tx.commit().await.map_err(db_error)?;
+    tx.commit().await?;
 
     let row: AlertRow = sqlx::query_as(&format!("{SELECT_ALERTS} WHERE a.id = $1"))
         .bind(id)
         .fetch_one(&state.db)
-        .await
-        .map_err(db_error)?;
+        .await?;
 
-    let mut response = (StatusCode::OK, Json(Alert::from(row))).into_response();
-    if changed {
-        response.extensions_mut().insert(Audited);
-    }
+    let response = (StatusCode::OK, Json(Alert::from(row))).into_response();
+    let response = if changed {
+        // Audited above; a request that changed nothing is left to the
+        // middleware's generic entry.
+        mark_audited(response)
+    } else {
+        response
+    };
     Ok(response)
 }
 

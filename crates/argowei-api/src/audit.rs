@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use sqlx::PgExecutor;
 
 use crate::auth::AuthUser;
+use crate::error::ApiError;
 use crate::state::AppState;
 
 /// Actor recorded when no authenticated user is involved.
@@ -96,9 +97,21 @@ impl AuditEntry {
 }
 
 /// Marker placed in a response's extensions by handlers that wrote their own
-/// audit entry, telling [`audit_mutations`] not to add a generic one.
+/// audit entry, telling [`audit_mutations`] not to add a generic one. Set it
+/// with [`mark_audited`] (or return [`crate::error::ApiError::audited`]).
 #[derive(Clone, Copy)]
 pub struct Audited;
+
+/// Tells the audit middleware that the handler already recorded this request.
+///
+/// The contract: a handler that writes an [`AuditEntry`] for a request marks
+/// its response, success or failure, with this; a handler that writes none
+/// leaves the response alone and the middleware records a generic entry.
+/// Forgetting the mark only costs a duplicate entry, never a missing one.
+pub fn mark_audited(mut response: Response) -> Response {
+    response.extensions_mut().insert(Audited);
+    response
+}
 
 /// Inserts an audit entry. Pass a transaction to commit it with the change.
 /// Secrets in the payload are redacted before insert.
@@ -268,7 +281,7 @@ struct ListResponse {
 async fn list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<ListResponse>, StatusCode> {
+) -> Result<Json<ListResponse>, ApiError> {
     let limit = query
         .limit
         .unwrap_or(DEFAULT_PAGE_SIZE)
@@ -294,11 +307,7 @@ async fn list(
     // One extra row tells us whether another page exists.
     .bind(limit + 1)
     .fetch_all(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(%error, "failed to list audit log");
-        StatusCode::SERVICE_UNAVAILABLE
-    })?;
+    .await?;
 
     let next_before = if items.len() as i64 > limit {
         items.truncate(limit as usize);

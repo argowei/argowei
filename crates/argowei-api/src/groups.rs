@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
-use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
+use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
-use crate::error::{db_error, is_foreign_key_violation, is_unique_violation, ApiError};
+use crate::error::{is_foreign_key_violation, is_unique_violation, ApiError};
 use crate::state::AppState;
 
 const MAX_NAME_CHARS: usize = 64;
@@ -53,7 +53,7 @@ async fn fetch_groups(db: &PgPool, only: Option<i32>) -> sqlx::Result<Vec<Group>
 }
 
 async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<Group>>, ApiError> {
-    Ok(Json(fetch_groups(&state.db, None).await.map_err(db_error)?))
+    Ok(Json(fetch_groups(&state.db, None).await?))
 }
 
 // --- validation -----------------------------------------------------------
@@ -131,7 +131,7 @@ async fn create_group(
     let description = normalize_description(&body.description)?;
     validate_defaults(&body.defaults)?;
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     let id: i32 = sqlx::query_scalar(
         "INSERT INTO device_groups (name, description, defaults) VALUES ($1, $2, $3) RETURNING id",
     )
@@ -144,7 +144,7 @@ async fn create_group(
         if is_unique_violation(&error) {
             ApiError::Conflict("a group with this name already exists")
         } else {
-            db_error(error)
+            ApiError::from(error)
         }
     })?;
     audit::record(
@@ -156,19 +156,17 @@ async fn create_group(
                 json!({ "name": name, "description": description, "defaults": body.defaults }),
             ),
     )
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
+    .await?;
+    tx.commit().await?;
 
     let group = fetch_groups(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .ok_or(ApiError::Unavailable)?;
-    let mut response = (StatusCode::CREATED, Json(group)).into_response();
-    response.extensions_mut().insert(Audited);
-    Ok(response)
+    Ok(mark_audited(
+        (StatusCode::CREATED, Json(group)).into_response(),
+    ))
 }
 
 // --- update ---------------------------------------------------------------
@@ -198,7 +196,7 @@ async fn update_group(
         validate_defaults(defaults)?;
     }
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     let (old_name, old_description, old_defaults, is_system): (String, String, Value, bool) =
         sqlx::query_as(
             "SELECT name, description, defaults, is_system FROM device_groups \
@@ -206,8 +204,7 @@ async fn update_group(
         )
         .bind(id)
         .fetch_optional(&mut *tx)
-        .await
-        .map_err(db_error)?
+        .await?
         .ok_or(ApiError::NotFound("no such group"))?;
 
     let name = new_name.unwrap_or_else(|| old_name.clone());
@@ -249,7 +246,7 @@ async fn update_group(
             if is_unique_violation(&error) {
                 ApiError::Conflict("a group with this name already exists")
             } else {
-                db_error(error)
+                ApiError::from(error)
             }
         })?;
         audit::record(
@@ -259,21 +256,23 @@ async fn update_group(
                 .remote_addr(meta.remote_addr)
                 .payload(json!({ "changes": Value::Object(changes) })),
         )
-        .await
-        .map_err(db_error)?;
+        .await?;
     }
-    tx.commit().await.map_err(db_error)?;
+    tx.commit().await?;
 
     let group = fetch_groups(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .ok_or(ApiError::NotFound("no such group"))?;
-    let mut response = Json(group).into_response();
-    if changed {
-        response.extensions_mut().insert(Audited);
-    }
+    let response = Json(group).into_response();
+    let response = if changed {
+        // Audited above; a request that changed nothing is left to the
+        // middleware's generic entry.
+        mark_audited(response)
+    } else {
+        response
+    };
     Ok(response)
 }
 
@@ -285,15 +284,14 @@ async fn delete_group(
     meta: RequestMeta,
     Path(id): Path<i32>,
 ) -> Result<Response, ApiError> {
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     let (name, is_system, devices): (String, bool, i64) = sqlx::query_as(
         "SELECT name, is_system, (SELECT count(*) FROM devices WHERE group_id = $1) \
          FROM device_groups WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?
+    .await?
     .ok_or(ApiError::NotFound("no such group"))?;
 
     if is_system {
@@ -314,7 +312,7 @@ async fn delete_group(
             if is_foreign_key_violation(&error) {
                 ApiError::Conflict("the group still has devices; move them to another group first")
             } else {
-                db_error(error)
+                ApiError::from(error)
             }
         })?;
     audit::record(
@@ -324,13 +322,10 @@ async fn delete_group(
             .remote_addr(meta.remote_addr)
             .payload(json!({ "name": name })),
     )
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
+    .await?;
+    tx.commit().await?;
 
-    let mut response = StatusCode::NO_CONTENT.into_response();
-    response.extensions_mut().insert(Audited);
-    Ok(response)
+    Ok(mark_audited(StatusCode::NO_CONTENT.into_response()))
 }
 
 #[cfg(test)]

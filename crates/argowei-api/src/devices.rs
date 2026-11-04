@@ -5,7 +5,6 @@ use argowei_core::device_type::{Classification, DeviceType};
 use argowei_core::names::NameSource;
 use argowei_core::oui;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Json, Router};
@@ -15,9 +14,9 @@ use serde_json::{json, Value};
 use sqlx::postgres::PgRow;
 use sqlx::{FromRow, PgPool, Row};
 
-use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
+use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
-use crate::error::{db_error, is_foreign_key_violation, ApiError};
+use crate::error::{is_foreign_key_violation, ApiError};
 use crate::state::AppState;
 
 const MAX_LABEL_CHARS: usize = 64;
@@ -194,11 +193,8 @@ pub fn router() -> Router<AppState> {
 
 async fn list_devices(
     State(state): State<AppState>,
-) -> Result<Json<Vec<DeviceWithAddresses>>, StatusCode> {
-    list_with_addresses(&state.db, None)
-        .await
-        .map(Json)
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
+) -> Result<Json<Vec<DeviceWithAddresses>>, ApiError> {
+    Ok(Json(list_with_addresses(&state.db, None).await?))
 }
 
 async fn get_device(
@@ -206,8 +202,7 @@ async fn get_device(
     Path(id): Path<i32>,
 ) -> Result<Json<DeviceWithAddresses>, ApiError> {
     list_with_addresses(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .map(Json)
@@ -383,7 +378,7 @@ async fn update_device(
         .transpose()?;
     let new_notes = body.notes.as_deref().map(normalize_notes).transpose()?;
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     let (old_label, old_notes, old_group, old_trust, old_type): (
         Option<String>,
         String,
@@ -396,8 +391,7 @@ async fn update_device(
     )
     .bind(id)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?
+    .await?
     .ok_or(ApiError::NotFound("no such device"))?;
     let old_trust = TrustLevel::parse(&old_trust).ok_or(ApiError::Unavailable)?;
     let old_type = old_type
@@ -453,7 +447,7 @@ async fn update_device(
             if is_foreign_key_violation(&error) {
                 ApiError::BadRequest("no such group".into())
             } else {
-                db_error(error)
+                ApiError::from(error)
             }
         })?;
 
@@ -463,8 +457,7 @@ async fn update_device(
                 sqlx::query_as("SELECT id, name FROM device_groups WHERE id = ANY($1)")
                     .bind(vec![old_group, group])
                     .fetch_all(&mut *tx)
-                    .await
-                    .map_err(db_error)?;
+                    .await?;
             let describe = |group: i32| {
                 let name = names
                     .iter()
@@ -485,23 +478,24 @@ async fn update_device(
                 .remote_addr(meta.remote_addr)
                 .payload(json!({ "changes": Value::Object(changes) })),
         )
-        .await
-        .map_err(db_error)?;
+        .await?;
     }
-    tx.commit().await.map_err(db_error)?;
+    tx.commit().await?;
 
     let device = list_with_addresses(&state.db, Some(id))
-        .await
-        .map_err(db_error)?
+        .await?
         .into_iter()
         .next()
         .ok_or(ApiError::NotFound("no such device"))?;
 
-    let mut response = Json(device).into_response();
-    if changed {
-        // Written to the audit log above; skip the generic fallback entry.
-        response.extensions_mut().insert(Audited);
-    }
+    let response = Json(device).into_response();
+    let response = if changed {
+        // Audited above; a request that changed nothing is left to the
+        // middleware's generic entry.
+        mark_audited(response)
+    } else {
+        response
+    };
     Ok(response)
 }
 

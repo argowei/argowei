@@ -29,8 +29,8 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use subtle::ConstantTimeEq;
 
-use crate::audit::{self, AuditEntry, Audited, Outcome, RequestMeta};
-use crate::error::{db_error, ApiError};
+use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
+use crate::error::ApiError;
 use crate::state::AppState;
 use throttle::LoginThrottle;
 
@@ -126,7 +126,7 @@ pub async fn require_auth(
     let user = match user {
         Ok(Some((id, username))) => AuthUser { id, username },
         Ok(None) => return ApiError::Unauthorized.into_response(),
-        Err(error) => return db_error(error).into_response(),
+        Err(error) => return ApiError::from(error).into_response(),
     };
 
     request.extensions_mut().insert(user.clone());
@@ -186,7 +186,7 @@ async fn admin_exists(db: &PgPool) -> sqlx::Result<bool> {
 }
 
 async fn status(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
-    let exists = admin_exists(&state.db).await.map_err(db_error)?;
+    let exists = admin_exists(&state.db).await?;
     Ok(Json(json!({ "setup_required": !exists })))
 }
 
@@ -254,7 +254,7 @@ async fn setup(
         .await
         .ok_or(ApiError::Unavailable)?;
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     // The unique index on `(true)` makes this a no-op if an admin exists.
     let created: Option<i32> = sqlx::query_scalar(
         "INSERT INTO admin_users (username, password_hash) VALUES ($1, $2) \
@@ -263,8 +263,7 @@ async fn setup(
     .bind(&username)
     .bind(&password_hash)
     .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?;
+    .await?;
 
     let Some(id) = created else {
         return Err(ApiError::Conflict("setup already completed"));
@@ -276,15 +275,14 @@ async fn setup(
             .target("admin_user", id)
             .remote_addr(remote),
     )
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
+    .await?;
+    tx.commit().await?;
 
     *auth.setup_token.lock().expect("setup token lock poisoned") = None;
 
-    let mut response = (StatusCode::CREATED, Json(json!({ "username": username }))).into_response();
-    response.extensions_mut().insert(Audited);
-    Ok(response)
+    Ok(mark_audited(
+        (StatusCode::CREATED, Json(json!({ "username": username }))).into_response(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -306,8 +304,7 @@ async fn login(
         sqlx::query_as("SELECT id, username, password_hash FROM admin_users WHERE username = $1")
             .bind(&body.username)
             .fetch_optional(&state.db)
-            .await
-            .map_err(db_error)?;
+            .await?;
 
     let key = admin
         .as_ref()
@@ -352,25 +349,22 @@ async fn login(
     let token = random_token();
     let expires_at = Utc::now() + auth.session_ttl;
 
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
         .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
+        .await?;
     sqlx::query("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)")
         .bind(hash_token(&token))
         .bind(user_id)
         .bind(expires_at)
         .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
+        .await?;
     audit::record(
         &mut *tx,
         login_entry(&username, Outcome::Success, remote).target("admin_user", user_id),
     )
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
+    .await?;
+    tx.commit().await?;
 
     let cookie = Cookie::build((SESSION_COOKIE, token))
         .http_only(true)
@@ -380,8 +374,7 @@ async fn login(
         .max_age(time::Duration::seconds(auth.session_ttl.num_seconds()))
         .build();
 
-    let mut response = Json(json!({ "username": username })).into_response();
-    response.extensions_mut().insert(Audited);
+    let response = mark_audited(Json(json!({ "username": username })).into_response());
     Ok((jar.add(cookie), response))
 }
 
@@ -391,13 +384,12 @@ async fn logout(
     jar: CookieJar,
     request_meta: RequestMeta,
 ) -> Result<(CookieJar, Response), ApiError> {
-    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let mut tx = state.db.begin().await?;
     if let Some(cookie) = jar.get(SESSION_COOKIE) {
         sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
             .bind(hash_token(cookie.value()))
             .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
+            .await?;
     }
     audit::record(
         &mut *tx,
@@ -405,12 +397,10 @@ async fn logout(
             .target("admin_user", user.id)
             .remote_addr(request_meta.remote_addr),
     )
-    .await
-    .map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
+    .await?;
+    tx.commit().await?;
 
-    let mut response = StatusCode::NO_CONTENT.into_response();
-    response.extensions_mut().insert(Audited);
+    let response = mark_audited(StatusCode::NO_CONTENT.into_response());
     Ok((
         jar.remove(Cookie::build(SESSION_COOKIE).path("/")),
         response,

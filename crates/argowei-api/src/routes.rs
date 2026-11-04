@@ -46,18 +46,18 @@ async fn root() -> Json<Value> {
 async fn health(State(state): State<AppState>) -> Json<Value> {
     let database_status = match sqlx::query("SELECT 1").execute(&state.db).await {
         Ok(_) => "ok",
-        Err(_) => "unavailable",
+        Err(error) => {
+            tracing::warn!(%error, "health check: database unavailable");
+            "unavailable"
+        }
     };
 
-    let redis_status = match state.redis.get_multiplexed_async_connection().await {
-        Ok(mut conn) => {
-            let pong: Result<String, _> = redis::cmd("PING").query_async(&mut conn).await;
-            match pong {
-                Ok(_) => "ok",
-                Err(_) => "unavailable",
-            }
+    let redis_status = match ping_redis(&state.redis).await {
+        Ok(()) => "ok",
+        Err(error) => {
+            tracing::warn!(%error, "health check: redis unavailable");
+            "unavailable"
         }
-        Err(_) => "unavailable",
     };
 
     Json(json!({
@@ -65,4 +65,12 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         "database": database_status,
         "redis": redis_status,
     }))
+}
+
+async fn ping_redis(client: &redis::Client) -> redis::RedisResult<()> {
+    let mut connection = client.get_multiplexed_async_connection().await?;
+    redis::cmd("PING")
+        .query_async::<String>(&mut connection)
+        .await?;
+    Ok(())
 }
