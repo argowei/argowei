@@ -86,3 +86,7 @@ The CI runs both commands. Next, collect consented lab traces with an
 independent ground-truth signal, record scanner failures separately from empty
 scans, and report false offline duration and departure-detection latency across
 device types and scan intervals. Keep synthetic and field results separate.
+
+The [trace replay benchmark](PRESENCE-REPLAY.md) accepts external observation
+and ground-truth timelines, measures duration-weighted errors, and records
+multiple departures with explicit undetected and censored outcomes.

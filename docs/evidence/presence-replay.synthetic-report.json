@@ -1,0 +1,609 @@
+{
+  "artifact_version": 1,
+  "input_sha256": "7ac4ec96893397ad8c5486b556d4ebcd2aa4a594b725de0c6189251ab1e184ee",
+  "report": {
+    "schema_version": 1,
+    "dataset": {
+      "id": "synthetic-presence-replay-v1",
+      "kind": "synthetic",
+      "description": "Hand-authored regression examples, not measurements or a sampled device population.",
+      "ground_truth_source": "Explicit synthetic state changes specified separately from the scan outcomes."
+    },
+    "policy": {
+      "offline_after_missed_scans": 3,
+      "offline_after_secs": 900
+    },
+    "methodology": "Intervals are [at_ms, next_event_ms), ending at duration_ms. Labels and observations at the same timestamp apply together. Prediction starts unknown until a reply; failed scans preserve state and miss count; only completed scans change predictions. An online-to-offline label transition starts a departure; an already-offline prediction detects it with zero delay. A return before detection is undetected; loss of labels or the trace ending before detection is censored. Delay p50/p95 use nearest-rank quantiles of detected departures only; undetected and censored counts are reported separately. Lab provenance is supplied by the recorder, not verified by this tool.",
+    "traces": [
+      {
+        "device_id": "sleep-and-scanner-outage",
+        "interface": "synthetic-lan",
+        "duration_ms": 2100000,
+        "methods": [
+          {
+            "method": "production_and",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 1800000,
+                  "offline_ms": 300000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 1,
+              "false_online_episodes": 0,
+              "completed_scans": 6,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          },
+          {
+            "method": "time_only",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 1500000,
+                  "offline_ms": 600000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 1,
+              "false_online_episodes": 0,
+              "completed_scans": 6,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          },
+          {
+            "method": "misses_only",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 1800000,
+                  "offline_ms": 300000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 1,
+              "false_online_episodes": 0,
+              "completed_scans": 6,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          },
+          {
+            "method": "one_miss",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 600000,
+                  "offline_ms": 1500000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 2,
+              "false_online_episodes": 0,
+              "completed_scans": 6,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          }
+        ]
+      },
+      {
+        "device_id": "two-departures",
+        "interface": "synthetic-lan",
+        "duration_ms": 2100000,
+        "methods": [
+          {
+            "method": "production_and",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 420000,
+                  "offline_ms": 120000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 1440000,
+                  "offline_ms": 120000,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 1,
+              "false_online_episodes": 2,
+              "completed_scans": 8,
+              "failed_scans": 0
+            },
+            "departures": [
+              {
+                "at_ms": 300000,
+                "status": "detected",
+                "detected_at_ms": 1080000,
+                "delay_ms": 780000
+              },
+              {
+                "at_ms": 1440000,
+                "status": "censored",
+                "censored_at_ms": 2100000,
+                "observed_for_ms": 660000,
+                "reason": "trace_end"
+              }
+            ],
+            "detection": {
+              "departures": 2,
+              "detected": 1,
+              "undetected": 0,
+              "censored": 1,
+              "detected_delay_p50_ms": 780000,
+              "detected_delay_p95_ms": 780000
+            }
+          },
+          {
+            "method": "time_only",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 420000,
+                  "offline_ms": 120000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 1260000,
+                  "offline_ms": 300000,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 1,
+              "false_online_episodes": 2,
+              "completed_scans": 8,
+              "failed_scans": 0
+            },
+            "departures": [
+              {
+                "at_ms": 300000,
+                "status": "detected",
+                "detected_at_ms": 900000,
+                "delay_ms": 600000
+              },
+              {
+                "at_ms": 1440000,
+                "status": "censored",
+                "censored_at_ms": 2100000,
+                "observed_for_ms": 660000,
+                "reason": "trace_end"
+              }
+            ],
+            "detection": {
+              "departures": 2,
+              "detected": 1,
+              "undetected": 0,
+              "censored": 1,
+              "detected_delay_p50_ms": 600000,
+              "detected_delay_p95_ms": 600000
+            }
+          },
+          {
+            "method": "misses_only",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 420000,
+                  "offline_ms": 120000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 1080000,
+                  "offline_ms": 480000,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 1,
+              "false_online_episodes": 2,
+              "completed_scans": 8,
+              "failed_scans": 0
+            },
+            "departures": [
+              {
+                "at_ms": 300000,
+                "status": "detected",
+                "detected_at_ms": 1080000,
+                "delay_ms": 780000
+              },
+              {
+                "at_ms": 1440000,
+                "status": "detected",
+                "detected_at_ms": 1740000,
+                "delay_ms": 300000
+              }
+            ],
+            "detection": {
+              "departures": 2,
+              "detected": 2,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": 300000,
+              "detected_delay_p95_ms": 780000
+            }
+          },
+          {
+            "method": "one_miss",
+            "metrics": {
+              "duration_ms": 2100000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 420000,
+                  "offline_ms": 120000,
+                  "unknown_ms": 0
+                },
+                "truth_offline": {
+                  "online_ms": 360000,
+                  "offline_ms": 1200000,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 0
+              },
+              "false_offline_episodes": 1,
+              "false_online_episodes": 2,
+              "completed_scans": 8,
+              "failed_scans": 0
+            },
+            "departures": [
+              {
+                "at_ms": 300000,
+                "status": "detected",
+                "detected_at_ms": 600000,
+                "delay_ms": 300000
+              },
+              {
+                "at_ms": 1440000,
+                "status": "detected",
+                "detected_at_ms": 1500000,
+                "delay_ms": 60000
+              }
+            ],
+            "detection": {
+              "departures": 2,
+              "detected": 2,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": 60000,
+              "detected_delay_p95_ms": 300000
+            }
+          }
+        ]
+      },
+      {
+        "device_id": "unobserved-and-unlabeled",
+        "interface": "synthetic-lan",
+        "duration_ms": 1200000,
+        "methods": [
+          {
+            "method": "production_and",
+            "metrics": {
+              "duration_ms": 1200000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 480000
+                },
+                "truth_offline": {
+                  "online_ms": 480000,
+                  "offline_ms": 0,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 240000
+              },
+              "false_offline_episodes": 0,
+              "false_online_episodes": 1,
+              "completed_scans": 3,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          },
+          {
+            "method": "time_only",
+            "metrics": {
+              "duration_ms": 1200000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 480000
+                },
+                "truth_offline": {
+                  "online_ms": 480000,
+                  "offline_ms": 0,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 240000
+              },
+              "false_offline_episodes": 0,
+              "false_online_episodes": 1,
+              "completed_scans": 3,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          },
+          {
+            "method": "misses_only",
+            "metrics": {
+              "duration_ms": 1200000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 480000
+                },
+                "truth_offline": {
+                  "online_ms": 480000,
+                  "offline_ms": 0,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 240000
+              },
+              "false_offline_episodes": 0,
+              "false_online_episodes": 1,
+              "completed_scans": 3,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          },
+          {
+            "method": "one_miss",
+            "metrics": {
+              "duration_ms": 1200000,
+              "confusion": {
+                "truth_online": {
+                  "online_ms": 0,
+                  "offline_ms": 0,
+                  "unknown_ms": 480000
+                },
+                "truth_offline": {
+                  "online_ms": 180000,
+                  "offline_ms": 300000,
+                  "unknown_ms": 0
+                },
+                "unlabeled_ms": 240000
+              },
+              "false_offline_episodes": 0,
+              "false_online_episodes": 1,
+              "completed_scans": 3,
+              "failed_scans": 1
+            },
+            "departures": [],
+            "detection": {
+              "departures": 0,
+              "detected": 0,
+              "undetected": 0,
+              "censored": 0,
+              "detected_delay_p50_ms": null,
+              "detected_delay_p95_ms": null
+            }
+          }
+        ]
+      }
+    ],
+    "aggregate": [
+      {
+        "method": "production_and",
+        "trace_count": 3,
+        "metrics": {
+          "duration_ms": 5400000,
+          "confusion": {
+            "truth_online": {
+              "online_ms": 2220000,
+              "offline_ms": 420000,
+              "unknown_ms": 480000
+            },
+            "truth_offline": {
+              "online_ms": 1920000,
+              "offline_ms": 120000,
+              "unknown_ms": 0
+            },
+            "unlabeled_ms": 240000
+          },
+          "false_offline_episodes": 2,
+          "false_online_episodes": 3,
+          "completed_scans": 17,
+          "failed_scans": 2
+        },
+        "detection": {
+          "departures": 2,
+          "detected": 1,
+          "undetected": 0,
+          "censored": 1,
+          "detected_delay_p50_ms": 780000,
+          "detected_delay_p95_ms": 780000
+        }
+      },
+      {
+        "method": "time_only",
+        "trace_count": 3,
+        "metrics": {
+          "duration_ms": 5400000,
+          "confusion": {
+            "truth_online": {
+              "online_ms": 1920000,
+              "offline_ms": 720000,
+              "unknown_ms": 480000
+            },
+            "truth_offline": {
+              "online_ms": 1740000,
+              "offline_ms": 300000,
+              "unknown_ms": 0
+            },
+            "unlabeled_ms": 240000
+          },
+          "false_offline_episodes": 2,
+          "false_online_episodes": 3,
+          "completed_scans": 17,
+          "failed_scans": 2
+        },
+        "detection": {
+          "departures": 2,
+          "detected": 1,
+          "undetected": 0,
+          "censored": 1,
+          "detected_delay_p50_ms": 600000,
+          "detected_delay_p95_ms": 600000
+        }
+      },
+      {
+        "method": "misses_only",
+        "trace_count": 3,
+        "metrics": {
+          "duration_ms": 5400000,
+          "confusion": {
+            "truth_online": {
+              "online_ms": 2220000,
+              "offline_ms": 420000,
+              "unknown_ms": 480000
+            },
+            "truth_offline": {
+              "online_ms": 1560000,
+              "offline_ms": 480000,
+              "unknown_ms": 0
+            },
+            "unlabeled_ms": 240000
+          },
+          "false_offline_episodes": 2,
+          "false_online_episodes": 3,
+          "completed_scans": 17,
+          "failed_scans": 2
+        },
+        "detection": {
+          "departures": 2,
+          "detected": 2,
+          "undetected": 0,
+          "censored": 0,
+          "detected_delay_p50_ms": 300000,
+          "detected_delay_p95_ms": 780000
+        }
+      },
+      {
+        "method": "one_miss",
+        "trace_count": 3,
+        "metrics": {
+          "duration_ms": 5400000,
+          "confusion": {
+            "truth_online": {
+              "online_ms": 1020000,
+              "offline_ms": 1620000,
+              "unknown_ms": 480000
+            },
+            "truth_offline": {
+              "online_ms": 540000,
+              "offline_ms": 1500000,
+              "unknown_ms": 0
+            },
+            "unlabeled_ms": 240000
+          },
+          "false_offline_episodes": 3,
+          "false_online_episodes": 3,
+          "completed_scans": 17,
+          "failed_scans": 2
+        },
+        "detection": {
+          "departures": 2,
+          "detected": 2,
+          "undetected": 0,
+          "censored": 0,
+          "detected_delay_p50_ms": 60000,
+          "detected_delay_p95_ms": 300000
+        }
+      }
+    ]
+  }
+}

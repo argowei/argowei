@@ -8,6 +8,8 @@ on:
       - "Cargo.lock"
       - "docs/PRESENCE-EVALUATION.md"
       - "docs/evidence/presence-evaluation.json"
+      - "docs/PRESENCE-REPLAY.md"
+      - "docs/evidence/presence-replay*.json"
       - ".github/workflows/backend.yml"
   push:
     branches:
@@ -18,6 +20,8 @@ on:
       - "Cargo.lock"
       - "docs/PRESENCE-EVALUATION.md"
       - "docs/evidence/presence-evaluation.json"
+      - "docs/PRESENCE-REPLAY.md"
+      - "docs/evidence/presence-replay*.json"
       - ".github/workflows/backend.yml"
 
 permissions:
@@ -70,3 +74,8 @@ jobs:
         run: |
           cargo test --locked -p argowei-api --example presence_evaluation
           cargo run --locked -q -p argowei-api --example presence_evaluation | diff - docs/evidence/presence-evaluation.json
+
+      - name: Verify presence trace replay
+        run: |
+          cargo test --locked -p argowei-api --example presence_replay
+          cargo run --locked -q -p argowei-api --example presence_replay -- docs/evidence/presence-replay.synthetic.json | diff - docs/evidence/presence-replay.synthetic-report.json

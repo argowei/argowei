@@ -26,7 +26,7 @@ Discovery is disabled until you configure an interface. The [technical reference
 
 - [Deployment](docs/DEPLOYMENT.md) — installation and network setup
 - [Technical reference](docs/TECHNICAL-REFERENCE.md) — discovery, authentication, data model, and development checks
-- [Presence evaluation](docs/PRESENCE-EVALUATION.md) — a reproducible experiment on offline detection, with [results](docs/evidence/presence-evaluation.json)
+- [Presence evaluation](docs/PRESENCE-EVALUATION.md) — synthetic checks and a [trace replay benchmark](docs/PRESENCE-REPLAY.md) for independently labeled observations
 
 ## Contributing
 

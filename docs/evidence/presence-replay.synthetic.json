@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "id": "synthetic-presence-replay-v1",
+    "kind": "synthetic",
+    "description": "Hand-authored regression examples, not measurements or a sampled device population.",
+    "ground_truth_source": "Explicit synthetic state changes specified separately from the scan outcomes."
+  },
+  "policy": {
+    "offline_after_missed_scans": 3,
+    "offline_after_secs": 900
+  },
+  "traces": [
+    {
+      "device_id": "sleep-and-scanner-outage",
+      "interface": "synthetic-lan",
+      "duration_ms": 2100000,
+      "observations": [
+        { "at_ms": 0, "outcome": "reply" },
+        { "at_ms": 300000, "outcome": "miss" },
+        { "at_ms": 600000, "outcome": "failed" },
+        { "at_ms": 900000, "outcome": "miss" },
+        { "at_ms": 1200000, "outcome": "miss" },
+        { "at_ms": 1500000, "outcome": "reply" },
+        { "at_ms": 1800000, "outcome": "miss" }
+      ],
+      "ground_truth": [
+        { "at_ms": 0, "state": "online" }
+      ]
+    },
+    {
+      "device_id": "two-departures",
+      "interface": "synthetic-lan",
+      "duration_ms": 2100000,
+      "observations": [
+        { "at_ms": 0, "outcome": "reply" },
+        { "at_ms": 600000, "outcome": "miss" },
+        { "at_ms": 900000, "outcome": "miss" },
+        { "at_ms": 1080000, "outcome": "miss" },
+        { "at_ms": 1320000, "outcome": "reply" },
+        { "at_ms": 1500000, "outcome": "miss" },
+        { "at_ms": 1680000, "outcome": "miss" },
+        { "at_ms": 1740000, "outcome": "miss" }
+      ],
+      "ground_truth": [
+        { "at_ms": 0, "state": "online" },
+        { "at_ms": 300000, "state": "offline" },
+        { "at_ms": 1200000, "state": "online" },
+        { "at_ms": 1440000, "state": "offline" }
+      ]
+    },
+    {
+      "device_id": "unobserved-and-unlabeled",
+      "interface": "synthetic-lan",
+      "duration_ms": 1200000,
+      "observations": [
+        { "at_ms": 120000, "outcome": "failed" },
+        { "at_ms": 300000, "outcome": "miss" },
+        { "at_ms": 600000, "outcome": "reply" },
+        { "at_ms": 900000, "outcome": "miss" }
+      ],
+      "ground_truth": [
+        { "at_ms": 0, "state": "online" },
+        { "at_ms": 480000, "state": "unknown" },
+        { "at_ms": 720000, "state": "offline" }
+      ]
+    }
+  ]
+}
