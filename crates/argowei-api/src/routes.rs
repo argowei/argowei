@@ -51,7 +51,7 @@ async fn root() -> Json<Value> {
     }))
 }
 
-/// Reports API liveness plus DB/Redis connectivity for compose healthchecks.
+/// Reports API liveness and database connectivity.
 async fn health(State(state): State<AppState>) -> Json<Value> {
     let database_status = match sqlx::query("SELECT 1").execute(&state.db).await {
         Ok(_) => "ok",
@@ -61,25 +61,8 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         }
     };
 
-    let redis_status = match ping_redis(&state.redis).await {
-        Ok(()) => "ok",
-        Err(error) => {
-            tracing::warn!(%error, "health check: redis unavailable");
-            "unavailable"
-        }
-    };
-
     Json(json!({
         "status": "ok",
         "database": database_status,
-        "redis": redis_status,
     }))
-}
-
-async fn ping_redis(client: &redis::Client) -> redis::RedisResult<()> {
-    let mut connection = client.get_multiplexed_async_connection().await?;
-    redis::cmd("PING")
-        .query_async::<String>(&mut connection)
-        .await?;
-    Ok(())
 }

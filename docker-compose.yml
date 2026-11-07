@@ -17,18 +17,6 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:8-alpine
-    ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
       context: .
@@ -50,17 +38,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-argowei}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argowei}
       POSTGRES_DB: ${POSTGRES_DB:-argowei}
-      # Host network: published loopback ports of the db/redis services.
+      # Host network: the loopback-published database port.
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      REDIS_HOST: 127.0.0.1
-      REDIS_PORT: ${REDIS_PORT:-6379}
       ARGOWEI_COOKIE_SECURE: ${ARGOWEI_COOKIE_SECURE:-false}
       ARGOWEI_SESSION_TTL_HOURS: ${ARGOWEI_SESSION_TTL_HOURS:-24}
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
   frontend:
@@ -81,4 +65,3 @@ services:
 
 volumes:
   postgres-data:
-  redis-data:

@@ -1,5 +1,4 @@
-//! The Argowei API server: an axum app over Postgres (and Redis for the
-//! health check), plus the scheduled discovery that feeds it.
+//! The Argowei API server: an axum app over Postgres, plus scheduled discovery.
 //!
 //! - [`routes`] assembles the app and its middleware (origin check, audit,
 //!   authentication).

@@ -30,8 +30,7 @@ pub struct Harness {
 
 pub async fn harness(pool: PgPool) -> Harness {
     let auth = AuthState::new(false, chrono::Duration::hours(1));
-    let redis = redis::Client::open("redis://127.0.0.1:6379/0").unwrap();
-    let state = AppState::new(pool.clone(), redis, auth);
+    let state = AppState::new(pool.clone(), auth);
     let setup_token = state
         .auth
         .init_setup_token(&state.db)

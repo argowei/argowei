@@ -6,7 +6,7 @@
 /// Values are read from environment variables (see .env.example), falling
 /// back to the defaults below for local development without Docker. The
 /// defaults mirror docker-compose.yml so a plain `cargo run` against a
-/// locally running Postgres/Redis works out of the box.
+/// locally running Postgres works out of the box.
 pub struct Settings {
     /// Address the API listens on.
     pub bind_address: std::net::SocketAddr,
@@ -16,10 +16,6 @@ pub struct Settings {
     pub postgres_db: String,
     pub postgres_host: String,
     pub postgres_port: u16,
-
-    pub redis_host: String,
-    pub redis_port: u16,
-    pub redis_db: u8,
 
     /// Mark the session cookie `Secure`. Leave off for plain-HTTP LAN
     /// deployments; enable when served over HTTPS (e.g. behind nginx).
@@ -65,14 +61,6 @@ impl Settings {
                 .parse()
                 .expect("POSTGRES_PORT must be a valid port number"),
 
-            redis_host: env_or("REDIS_HOST", "localhost"),
-            redis_port: env_or("REDIS_PORT", "6379")
-                .parse()
-                .expect("REDIS_PORT must be a valid port number"),
-            redis_db: env_or("REDIS_DB", "0")
-                .parse()
-                .expect("REDIS_DB must be a valid database index"),
-
             cookie_secure: matches!(
                 env_or("ARGOWEI_COOKIE_SECURE", "false").as_str(),
                 "1" | "true"
@@ -114,13 +102,6 @@ impl Settings {
             self.postgres_host,
             self.postgres_port,
             self.postgres_db
-        )
-    }
-
-    pub fn redis_url(&self) -> String {
-        format!(
-            "redis://{}:{}/{}",
-            self.redis_host, self.redis_port, self.redis_db
         )
     }
 }

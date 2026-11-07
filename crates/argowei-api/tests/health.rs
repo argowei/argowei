@@ -52,5 +52,4 @@ async fn health_reports_status_and_dependency_checks() {
     let payload = body_json(response).await;
     assert_eq!(payload["status"], "ok");
     assert!(payload["database"].is_string());
-    assert!(payload["redis"].is_string());
 }
