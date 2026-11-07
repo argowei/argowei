@@ -129,6 +129,7 @@ struct Sender {
     packets: Vec<Vec<u8>>,
     fail: bool,
     no_capacity: bool,
+    wait_for_read: Option<mpsc::Receiver<()>>,
 }
 
 impl DataLinkSender for Sender {
@@ -146,6 +147,11 @@ impl DataLinkSender for Sender {
         packet: &[u8],
         _: Option<NetworkInterface>,
     ) -> Option<std::io::Result<()>> {
+        if let Some(ready) = self.wait_for_read.take() {
+            ready
+                .recv_timeout(Duration::from_secs(2))
+                .expect("receiver never started reading");
+        }
         if self.no_capacity {
             return None;
         }
@@ -183,10 +189,14 @@ struct Receiver {
     pending: std::collections::VecDeque<Vec<u8>>,
     current: Vec<u8>,
     fail: bool,
+    notify_read: Option<mpsc::Sender<()>>,
 }
 
 impl DataLinkReceiver for Receiver {
     fn next(&mut self) -> std::io::Result<&[u8]> {
+        if let Some(ready) = self.notify_read.take() {
+            ready.send(()).expect("sender stopped before read");
+        }
         if self.fail {
             return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
         }
@@ -206,6 +216,7 @@ fn scan_deduplicates_replies_and_finishes_on_a_quiet_channel() {
         pending: [reply(), reply()].into(),
         current: vec![],
         fail: false,
+        notify_read: None,
     };
     let hosts = scan_channel(
         &mut sender,
@@ -239,15 +250,19 @@ fn scan_deduplicates_replies_and_finishes_on_a_quiet_channel() {
 #[test]
 fn scan_propagates_transport_failures_instead_of_reporting_an_empty_network() {
     let mut sender = Sender::default();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    sender.wait_for_read = Some(ready_rx);
     let mut receiver = Receiver {
         pending: [].into(),
         current: vec![],
         fail: true,
+        notify_read: Some(ready_tx),
     };
     assert!(
         matches!(scan_channel(&mut sender, &mut receiver, LOCAL_IP, LOCAL_MAC, &[PEER_IP], Duration::from_millis(5)), Err(ArpScanError::Io(err)) if err.kind() == std::io::ErrorKind::BrokenPipe)
     );
     sender.fail = true;
+    sender.wait_for_read = None;
     receiver.fail = false;
     assert!(
         matches!(scan_channel(&mut sender, &mut receiver, LOCAL_IP, LOCAL_MAC, &[PEER_IP], Duration::from_millis(5)), Err(ArpScanError::Io(err)) if err.kind() == std::io::ErrorKind::PermissionDenied)
@@ -312,6 +327,7 @@ fn receives_while_requests_are_still_being_sent() {
             pending: [reply()].into(),
             current: vec![],
             fail: false,
+            notify_read: None,
         },
     );
     let hosts = scan_channel(
