@@ -4,16 +4,14 @@ Implementation details, configuration, and development commands for Argowei. For
 
 ## Local development
 
-Follow [Deployment](DEPLOYMENT.md) to choose a setup and apply database
-migrations before starting the API. The dashboard is available at
+Follow [Deployment](DEPLOYMENT.md) to choose a setup. The API applies pending
+database migrations at startup. The dashboard is available at
 <http://localhost:4200> and the API at <http://localhost:8000/api>.
 
-To run the API locally, start Postgres and Redis (e.g. with
-`docker compose up -d db redis`), then the backend:
+To run the API locally, start Postgres and then the backend:
 
 ```bash
-cargo install sqlx-cli --no-default-features --features postgres,rustls  # one-time setup
-sqlx migrate run --database-url postgres://argowei:argowei@localhost:5432/argowei
+docker compose up -d db
 cargo run -p argowei-api
 ```
 
@@ -324,11 +322,14 @@ with `docker compose up db`.
 
 ## Database migrations
 
-Schema changes are plain SQL files in `migrations/`, applied with
-`sqlx-cli`. After adding a new migration file:
+Schema changes are plain SQL files in `migrations/`, embedded in the API
+binary and applied before it serves requests. To add a new migration file,
+install `sqlx-cli` and run:
 
 ```bash
 sqlx migrate add describe_the_change
-sqlx migrate run --database-url postgres://argowei:argowei@localhost:5432/argowei
 ```
+
+Cargo rebuilds the API when `migrations/` changes. For manual inspection or repair, run
+`sqlx migrate info` or `sqlx migrate run` against the intended database.
 
