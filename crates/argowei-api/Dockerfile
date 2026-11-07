@@ -11,7 +11,7 @@ RUN cargo build --release --locked -p argowei-api
 FROM debian:trixie-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates libcap2-bin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -19,6 +19,7 @@ WORKDIR /app
 RUN groupadd --system argowei && useradd --system --gid argowei argowei
 
 COPY --from=builder /app/target/release/argowei-api ./argowei-api
+RUN setcap cap_net_raw=ep ./argowei-api
 
 USER argowei
 
