@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY migrations ./migrations
 
 RUN cargo build --release --locked -p argowei-api
 
@@ -18,7 +19,6 @@ WORKDIR /app
 RUN groupadd --system argowei && useradd --system --gid argowei argowei
 
 COPY --from=builder /app/target/release/argowei-api ./argowei-api
-COPY migrations ./migrations
 
 USER argowei
 

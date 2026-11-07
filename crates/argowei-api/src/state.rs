@@ -18,10 +18,8 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Builds a lazily-connecting pool: no connection is made until the first
-    /// query, so the app starts even before Postgres is up. The acquire timeout
-    /// is kept short so `/api/health` fails fast instead of hanging on
-    /// sqlx's default 30s connect-retry backoff when the database is down.
+    /// Builds a lazily-connecting pool. The server runs migrations before
+    /// serving requests; tests can still construct a state without a database.
     pub fn connect(settings: &Settings) -> Self {
         let db = PgPoolOptions::new()
             .acquire_timeout(Duration::from_secs(3))

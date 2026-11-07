@@ -19,6 +19,10 @@ async fn main() {
 
     let settings = Settings::from_env();
     let state = AppState::connect(&settings);
+    sqlx::migrate!("../../migrations")
+        .run(&state.db)
+        .await
+        .expect("database migrations failed");
     state.auth.init_setup_token(&state.db).await;
     if let Err(error) = alerts::apply_baseline_window(
         &state.db,
