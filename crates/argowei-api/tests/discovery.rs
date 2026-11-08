@@ -236,6 +236,14 @@ async fn run_scan_stores_what_the_scanner_found(db: PgPool) {
 
     assert!(matches!(outcome, ScanOutcome::Completed(s) if s.new_devices == 1));
     assert_eq!(count(&db, "devices").await, 1);
+    let linked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scan_attempts a JOIN discovery_scans s ON s.id = a.scan_id \
+         WHERE a.outcome = 'completed' AND a.interface = s.interface",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(linked, 1);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -256,6 +264,36 @@ async fn a_failed_scan_reports_the_error_and_stores_nothing(db: PgPool) {
     assert!(matches!(error, DiscoveryError::Scan(_)));
     assert!(error.to_string().contains("CAP_NET_RAW"));
     assert_eq!(count(&db, "devices").await, 0);
+    assert_eq!(count(&db, "discovery_scans").await, 0);
+    let failure: (String, String) =
+        sqlx::query_as("SELECT outcome, failure_kind FROM scan_attempts")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(failure, ("failed".into(), "scanner".into()));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_journal_failure_does_not_mask_the_scanner_error(db: PgPool) {
+    sqlx::query("DROP TABLE scan_attempts")
+        .execute(&db)
+        .await
+        .unwrap();
+    let scanner = FakeScanner::scripted(vec![Err("not permitted; grant CAP_NET_RAW".into())]);
+
+    let error = run_scan(
+        &db,
+        &scanner,
+        &InterfaceLocks::default(),
+        "eth0",
+        TIMEOUT,
+        &POLICY,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(error, DiscoveryError::Scan(_)));
+    assert!(error.to_string().contains("CAP_NET_RAW"));
 }
 
 /// Blocks inside `scan` until released, to hold an interface lock open.
@@ -298,6 +336,13 @@ async fn scans_of_the_same_interface_never_overlap(db: PgPool) {
         .await
         .unwrap();
     assert_eq!(second, ScanOutcome::Skipped);
+    let skipped: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scan_attempts WHERE interface = 'eth0' AND outcome = 'skipped'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(skipped, 1);
 
     // A different interface is independent.
     let other = FakeScanner::scripted(vec![Ok(vec![ObservedHost {
@@ -505,6 +550,7 @@ async fn a_failed_scan_leaves_presence_untouched(db: PgPool) {
     drop(scanner);
 
     assert_eq!(count(&db, "discovery_scans").await, 1);
+    assert_eq!(count(&db, "scan_attempts").await, 6);
     assert!(is_online(&db, MAC_A).await);
 }
 

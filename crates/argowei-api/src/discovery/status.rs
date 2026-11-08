@@ -13,10 +13,9 @@ use serde::Serialize;
 use super::{DiscoveryError, ScanOutcome, ScanSummary};
 use crate::state::AppState;
 
-/// How the latest scans of one interface went. Lives in memory only: a
-/// failed scan is not a scan (it writes no row and never counts as a missed
-/// scan for presence), but it should be visible, so it is reported here and
-/// forgotten on restart.
+/// How the latest scans of one interface went. This API snapshot lives in
+/// memory; the append-only attempt history is stored in `scan_attempts`.
+/// A failed attempt is never a completed scan or a device miss.
 #[derive(Debug, Clone, Serialize)]
 pub struct InterfaceStatus {
     pub interface: String,
@@ -56,8 +55,8 @@ impl DiscoveryStatus {
             .or_insert_with(|| InterfaceStatus::new(interface));
     }
 
-    /// Records the outcome of one attempt. A skipped attempt (another scan was
-    /// still running) is not an attempt and changes nothing.
+    /// Records the outcome for the status endpoint. A skipped scheduler tick
+    /// is journaled separately but does not change this latest-scan snapshot.
     pub fn record(
         &self,
         interface: &str,

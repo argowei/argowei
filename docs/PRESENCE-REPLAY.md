@@ -142,6 +142,8 @@ or CPU measurements are inferred by this replay.
 
 ## Collect a first lab dataset
 
+For a database-backed workflow, see the [presence lab protocol](PRESENCE-LAB.md).
+
 1. Define what online means for the experiment: for example, membership in a
    controlled LAN. Physical presence, a running OS, Wi-Fi association, and an
    ARP answer are different claims. Record sleep separately in the collection

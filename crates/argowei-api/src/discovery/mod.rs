@@ -13,8 +13,8 @@
 //!    that stayed silent long enough.
 //! 3. Name lookups ([`crate::names`]) run afterwards in a step of their own,
 //!    so nothing they do can fail or delay the stored scan.
-//! 4. `status`: the outcome of each attempt, including failures that store
-//!    nothing, is kept in memory for `GET /api/discovery/status`.
+//! 4. `status`: the latest outcome is kept in memory for
+//!    `GET /api/discovery/status`; scan attempts are also journaled in SQL.
 //!
 //! Scanning goes through the [`Scanner`] trait so all of the above can be
 //! tested without root or a network.

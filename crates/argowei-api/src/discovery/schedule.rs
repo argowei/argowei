@@ -71,22 +71,54 @@ pub async fn run_scan(
     policy: &PresencePolicy,
 ) -> Result<ScanOutcome, DiscoveryError> {
     let Ok(_guard) = locks.lock_for(interface).try_lock_owned() else {
+        journal_attempt(db, interface, "skipped", None).await;
         return Ok(ScanOutcome::Skipped);
     };
 
-    let hosts = {
+    let scan_result = {
         let scanner = Arc::clone(scanner);
         let interface = interface.to_owned();
-        tokio::task::spawn_blocking(move || scanner.scan(&interface, timeout))
-            .await
-            .map_err(DiscoveryError::Task)?
-            .map_err(DiscoveryError::Scan)?
+        tokio::task::spawn_blocking(move || scanner.scan(&interface, timeout)).await
+    };
+
+    let hosts = match scan_result {
+        Ok(Ok(hosts)) => hosts,
+        Ok(Err(error)) => {
+            journal_attempt(db, interface, "failed", Some("scanner")).await;
+            return Err(DiscoveryError::Scan(error));
+        }
+        Err(error) => {
+            journal_attempt(db, interface, "failed", Some("task")).await;
+            return Err(DiscoveryError::Task(error));
+        }
     };
 
     let summary = record_scan(db, interface, &hosts, Utc::now(), policy)
         .await
         .map_err(DiscoveryError::Database)?;
     Ok(ScanOutcome::Completed(summary))
+}
+
+/// Journals a non-completed attempt (`failed` or `skipped`) outside any scan
+/// transaction. Completed attempts are written with their scan in `record_scan`.
+///
+/// This runs for its side effect and never changes what `run_scan` returns: a
+/// journaling failure must not mask the scan error that triggered it, so it is
+/// logged here rather than propagated.
+async fn journal_attempt(db: &PgPool, interface: &str, outcome: &str, failure_kind: Option<&str>) {
+    let result = sqlx::query(
+        "INSERT INTO scan_attempts (interface, attempted_at, outcome, failure_kind) \
+                 VALUES ($1, $2, $3, $4)",
+    )
+    .bind(interface)
+    .bind(Utc::now())
+    .bind(outcome)
+    .bind(failure_kind)
+    .execute(db)
+    .await;
+    if let Err(error) = result {
+        tracing::warn!(%interface, %outcome, %error, "could not journal scan attempt");
+    }
 }
 
 /// The scheduler's settings, taken from [`Settings`].

@@ -405,7 +405,7 @@ async fn audit_log_endpoint_filters_and_paginates(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
-async fn discovery_status_shows_failed_scans_without_persisting_them(pool: PgPool) {
+async fn discovery_status_shows_failure_without_a_completed_scan(pool: PgPool) {
     use argowei_api::discovery::{DiscoveryError, ScanOutcome};
 
     let h = harness(pool).await;
@@ -437,7 +437,8 @@ async fn discovery_status_shows_failed_scans_without_persisting_them(pool: PgPoo
         .contains("CAP_NET_RAW"));
     assert!(entry["last_success_at"].is_null());
 
-    // Visible, but not stored: no scan row, so it cannot count as a miss.
+    // The status is manually updated here; no completed scan row exists, so
+    // this failure cannot count as a device miss.
     let scans: i64 = sqlx::query_scalar("SELECT count(*) FROM discovery_scans")
         .fetch_one(&h.pool)
         .await

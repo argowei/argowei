@@ -54,6 +54,16 @@ pub async fn record_scan(
         baseline: alerts::scan_in_baseline(&mut tx, interface, seen_at).await?,
     };
 
+    sqlx::query(
+        "INSERT INTO scan_attempts (interface, attempted_at, outcome, scan_id) \
+                 VALUES ($1, $2, 'completed', $3)",
+    )
+    .bind(interface)
+    .bind(seen_at)
+    .bind(scan.id)
+    .execute(&mut *tx)
+    .await?;
+
     for host in hosts {
         let ip = host.ip.to_string();
         let device = upsert_device(&mut tx, &scan, &host.mac).await?;

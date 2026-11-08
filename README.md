@@ -39,7 +39,7 @@ Discovery is disabled until you configure an interface. The [technical reference
 - [Deployment](docs/DEPLOYMENT.md) — installation and network setup
 - [Threat model](docs/THREAT-MODEL.md) — trust boundaries, controls and deployment limits
 - [Technical reference](docs/TECHNICAL-REFERENCE.md) — discovery, authentication, data model, and development checks
-- [Presence evaluation](docs/PRESENCE-EVALUATION.md) — synthetic checks and a [trace replay benchmark](docs/PRESENCE-REPLAY.md) for independently labeled observations
+- [Presence evaluation](docs/PRESENCE-EVALUATION.md) — synthetic checks, a [trace replay benchmark](docs/PRESENCE-REPLAY.md), and a [lab export protocol](docs/PRESENCE-LAB.md) for independently labeled observations
 
 ## Contributing
 

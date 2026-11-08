@@ -83,14 +83,15 @@ after one miss. Failed scans are not scans and never count as misses.
 
 A failed scan is still visible: `GET /api/discovery/status` (authenticated)
 lists, per configured interface, the last attempt, last success and summary,
-the last error, and the number of consecutive failures. This status lives in
-memory only: nothing is written to the database and it resets on restart.
+the last error, and the number of consecutive failures. This API snapshot
+resets on restart; the attempt history is persisted in `scan_attempts`.
 
 `is_online` is only the current view. The evidence is kept for analysis:
 
 | Table | Content |
 |---|---|
 | `discovery_scans` | every completed scan: interface, method, time, hosts seen |
+| `scan_attempts` | completed, failed and skipped attempts; completed rows link to `discovery_scans` |
 | `device_sightings` | which device answered in which scan, from which IP |
 | `events` | `device.discovered`, `device.online`, `device.offline` with the evidence in `payload` (missed scans, silence, policy) |
 
@@ -120,6 +121,12 @@ WHERE e.type LIKE 'device.%' ORDER BY d.mac_address, e.occurred_at;
 before presence tracking existed are not marked offline until seen again.
 No new probes are sent for any of this: presence is derived from the scans
 already running.
+
+Attempt journaling begins with migration `0011`; earlier completed scans have
+no matching attempt row. A database outage cannot be persisted to that same
+database and is reported only through logs and the transient status endpoint.
+The [lab export protocol](PRESENCE-LAB.md) describes how to turn recorded
+attempts into replay input with independent labels.
 
 Re-scans only move `last_seen` forward. A device that changes IP keeps its
 old address row, and when an IP moves to a different device both rows are
