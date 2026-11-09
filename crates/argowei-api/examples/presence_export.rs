@@ -97,6 +97,10 @@ struct Attempt {
     attempted_at: DateTime<Utc>,
     outcome: String,
     replied: bool,
+    scan_interface: Option<String>,
+    scanned_at: Option<DateTime<Utc>>,
+    offline_after_missed_scans: Option<i64>,
+    offline_after_secs: Option<i64>,
 }
 
 fn offset(at: DateTime<Utc>, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<u64, String> {
@@ -152,6 +156,16 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
             return Err("dataset provenance fields must not be blank".into());
         }
     }
+    // A single read-only snapshot keeps the inventory lookup, completeness
+    // check, attempts and sightings consistent while discovery is running.
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("cannot start export snapshot: {e}"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("cannot configure export snapshot: {e}"))?;
     let mut traces = Vec::with_capacity(study.traces.len());
     let mut ids = std::collections::HashSet::new();
     for window in study.traces {
@@ -175,7 +189,7 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
         let known: bool =
             sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM devices WHERE mac_address = $1)")
                 .bind(&mac)
-                .fetch_one(pool)
+                .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| format!("cannot look up device: {e}"))?;
         if !known {
@@ -187,13 +201,14 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
         let unjournaled: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM discovery_scans s \
              LEFT JOIN scan_attempts a ON a.scan_id = s.id \
+                 AND a.interface = s.interface AND a.attempted_at = s.scanned_at \
              WHERE s.interface = $1 AND s.scanned_at >= $2 AND s.scanned_at < $3 \
              AND a.id IS NULL)",
         )
         .bind(&window.interface)
         .bind(window.start)
         .bind(window.end)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| format!("cannot check scan history: {e}"))?;
         if unjournaled {
@@ -203,11 +218,13 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
             ));
         }
         let rows: Vec<Attempt> = sqlx::query_as(
-            "SELECT a.attempted_at, a.outcome, \
+            "SELECT a.attempted_at, a.outcome, s.interface AS scan_interface, \
+                    s.scanned_at, a.offline_after_missed_scans, a.offline_after_secs, \
                     EXISTS (SELECT 1 FROM device_sightings s \
                             JOIN devices d ON d.id = s.device_id \
                             WHERE s.scan_id = a.scan_id AND d.mac_address = $4) AS replied \
              FROM scan_attempts a \
+             LEFT JOIN discovery_scans s ON s.id = a.scan_id \
              WHERE a.interface = $1 AND a.attempted_at >= $2 AND a.attempted_at < $3 \
              ORDER BY a.attempted_at, a.id",
         )
@@ -215,7 +232,7 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
         .bind(window.start)
         .bind(window.end)
         .bind(&mac)
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await
         .map_err(|e| format!("cannot read scan attempts: {e}"))?;
         let mut observations = Vec::new();
@@ -223,6 +240,35 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
         for row in rows {
             if row.outcome == "skipped" {
                 continue;
+            }
+            if row.outcome == "completed"
+                && (row.scan_interface.as_deref() != Some(window.interface.as_str())
+                    || row.scanned_at != Some(row.attempted_at))
+            {
+                return Err(format!(
+                    "completed attempt has mismatched scan interface or timestamp for {}",
+                    window.device_id
+                ));
+            }
+            if row.outcome == "completed" {
+                let recorded = (row.offline_after_missed_scans, row.offline_after_secs);
+                if recorded.0.is_none() || recorded.1.is_none() {
+                    return Err(format!(
+                        "completed attempt has no recorded presence policy for {}; use a window after migration 0012",
+                        window.device_id
+                    ));
+                }
+                let expected = (
+                    i64::from(study.policy.offline_after_missed_scans),
+                    i64::try_from(study.policy.offline_after_secs)
+                        .map_err(|_| "study policy exceeds BIGINT seconds")?,
+                );
+                if recorded != (Some(expected.0), Some(expected.1)) {
+                    return Err(format!(
+                        "recorded presence policy differs from study policy for {}; use a separate study for each policy or correct the study",
+                        window.device_id
+                    ));
+                }
             }
             let at_ms = offset(row.attempted_at, window.start, window.end)?;
             if previous.is_some_and(|at| at >= at_ms) {
@@ -251,6 +297,9 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
             ground_truth,
         });
     }
+    tx.commit()
+        .await
+        .map_err(|e| format!("cannot finish export snapshot: {e}"))?;
     Ok(ReplayInput {
         schema_version: 1,
         dataset: study.dataset,
@@ -365,6 +414,38 @@ mod tests {
         assert!(value.to_string().contains("device-1"));
         assert!(!value.to_string().contains(mac));
 
+        let mut wrong_policy = study_json.clone();
+        wrong_policy["policy"]["offline_after_missed_scans"] = serde_json::json!(3);
+        let study: Study = serde_json::from_value(wrong_policy).unwrap();
+        assert!(export(&db, study)
+            .await
+            .err()
+            .unwrap()
+            .contains("recorded presence policy differs"));
+
+        sqlx::query(
+            "UPDATE scan_attempts SET offline_after_missed_scans = NULL, offline_after_secs = NULL \
+             WHERE attempted_at = $1",
+        )
+        .bind(start)
+        .execute(&db)
+        .await
+        .unwrap();
+        let study: Study = serde_json::from_value(study_json.clone()).unwrap();
+        assert!(export(&db, study)
+            .await
+            .err()
+            .unwrap()
+            .contains("no recorded presence policy"));
+        sqlx::query(
+            "UPDATE scan_attempts SET offline_after_missed_scans = 4, offline_after_secs = 1200 \
+             WHERE attempted_at = $1",
+        )
+        .bind(start)
+        .execute(&db)
+        .await
+        .unwrap();
+
         sqlx::query(
             "INSERT INTO discovery_scans (interface, scanned_at, hosts_seen) \
                      VALUES ('eth0', $1, 0)",
@@ -373,11 +454,43 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
-        let study = serde_json::from_value(study_json).unwrap();
+        let study = serde_json::from_value(study_json.clone()).unwrap();
         assert!(export(&db, study)
             .await
             .err()
             .unwrap()
             .contains("without attempt records"));
+
+        sqlx::query("DELETE FROM discovery_scans WHERE scanned_at = $1")
+            .bind(start + Duration::minutes(9))
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE discovery_scans SET interface = 'wlan0' WHERE scanned_at = $1")
+            .bind(start)
+            .execute(&db)
+            .await
+            .unwrap();
+        let study: Study = serde_json::from_value(study_json.clone()).unwrap();
+        assert!(export(&db, study)
+            .await
+            .err()
+            .unwrap()
+            .contains("mismatched scan interface or timestamp"));
+
+        sqlx::query(
+            "UPDATE discovery_scans SET interface = 'eth0', scanned_at = $1 WHERE scanned_at = $2",
+        )
+        .bind(start - Duration::seconds(1))
+        .bind(start)
+        .execute(&db)
+        .await
+        .unwrap();
+        let study: Study = serde_json::from_value(study_json).unwrap();
+        assert!(export(&db, study)
+            .await
+            .err()
+            .unwrap()
+            .contains("mismatched scan interface or timestamp"));
     }
 }

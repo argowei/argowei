@@ -54,13 +54,18 @@ pub async fn record_scan(
         baseline: alerts::scan_in_baseline(&mut tx, interface, seen_at).await?,
     };
 
+    let offline_after_secs = i64::try_from(policy.offline_after.as_secs())
+        .map_err(|_| sqlx::Error::Protocol("offline_after exceeds BIGINT seconds".into()))?;
     sqlx::query(
-        "INSERT INTO scan_attempts (interface, attempted_at, outcome, scan_id) \
-                 VALUES ($1, $2, 'completed', $3)",
+        "INSERT INTO scan_attempts \
+                 (interface, attempted_at, outcome, scan_id, offline_after_missed_scans, offline_after_secs) \
+                 VALUES ($1, $2, 'completed', $3, $4, $5)",
     )
     .bind(interface)
     .bind(seen_at)
     .bind(scan.id)
+    .bind(i64::from(policy.offline_after_missed_scans))
+    .bind(offline_after_secs)
     .execute(&mut *tx)
     .await?;
 

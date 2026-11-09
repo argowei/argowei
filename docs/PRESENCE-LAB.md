@@ -16,13 +16,16 @@ independent ground truth or establish field accuracy.
 4. Fix the scan interval, policy parameters, device classes, and exclusion
    rules before comparing methods. Use separate devices or periods for any
    parameter tuning and final evaluation. Enter the policy parameters actually
-   configured during collection in the study file; split windows if they change.
-5. Choose a window entirely after migration `0011`. Failed scans are retained;
-   skipped scheduler ticks are recorded but omitted from replay because no
-   scan ran. Database outages cannot be captured in the database; document
-   them as exclusions or explicitly uncertain windows. Export after the run
-   has stopped, before deleting inventory records. Completed scan timestamps
-   mark when results were stored, not when the ARP probe began.
+   configured during collection in the study file; the exporter verifies them
+   against the values stored with every completed scan. Use a separate study
+   and export if they change.
+5. Choose a window entirely after migration `0012`. Earlier scans have no
+   recorded policy snapshot and cannot pass this provenance check. Failed scans
+   are retained. Skipped scheduler ticks are recorded but omitted from replay
+   because no scan ran. Database outages cannot be captured in the database;
+   document them as exclusions or explicitly uncertain windows. Export after
+   the run has stopped, before deleting inventory records. Completed scan
+   timestamps mark when results were stored, not when the ARP probe began.
 
 ## Export
 
@@ -57,8 +60,13 @@ local database lookup and is omitted from the generated replay file.
 The example addresses and labels above are illustrative, not a measured
 dataset. Use a private study file for real MAC addresses and sensitive network
 metadata. The exporter rejects missing labels, empty observation windows,
-duplicate pseudonyms, unjournaled completed scans and events that collapse to
-the same millisecond.
+duplicate pseudonyms, unjournaled or inconsistently linked completed scans,
+and events that collapse to the same millisecond. It reads inventory, attempts,
+and sightings from one read-only database snapshot, so concurrent scans cannot
+produce a mixed export. A database outage that left no record still requires an
+operator-documented exclusion or `unknown` label. A policy mismatch or missing
+policy snapshot also stops the export; editing the study file cannot
+retroactively establish which thresholds were used.
 
 ```sh
 DATABASE_URL=postgres://... cargo run --locked -q -p argowei-api \

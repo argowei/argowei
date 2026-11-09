@@ -244,6 +244,42 @@ async fn run_scan_stores_what_the_scanner_found(db: PgPool) {
     .await
     .unwrap();
     assert_eq!(linked, 1);
+    let recorded_policy: (i64, i64) = sqlx::query_as(
+        "SELECT offline_after_missed_scans, offline_after_secs FROM scan_attempts \
+         WHERE outcome = 'completed'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        recorded_policy,
+        (
+            i64::from(POLICY.offline_after_missed_scans),
+            POLICY.offline_after.as_secs() as i64
+        )
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn scan_policy_snapshot_is_complete_and_only_for_completed_scans(db: PgPool) {
+    rec(&db, &[host(10, MAC_A)], t0()).await.unwrap();
+
+    let partial = sqlx::query(
+        "UPDATE scan_attempts SET offline_after_secs = NULL WHERE outcome = 'completed'",
+    )
+    .execute(&db)
+    .await;
+    assert!(partial.is_err());
+
+    let failed_with_policy = sqlx::query(
+        "INSERT INTO scan_attempts \
+         (interface, attempted_at, outcome, failure_kind, offline_after_missed_scans, offline_after_secs) \
+         VALUES ('eth0', $1, 'failed', 'scanner', 3, 900)",
+    )
+    .bind(t0() + ChronoDuration::minutes(1))
+    .execute(&db)
+    .await;
+    assert!(failed_with_policy.is_err());
 }
 
 #[sqlx::test(migrations = "../../migrations")]
