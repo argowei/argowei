@@ -237,10 +237,8 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
         .map_err(|e| format!("cannot read scan attempts: {e}"))?;
         let mut observations = Vec::new();
         let mut previous = None;
+        let mut has_non_skipped = false;
         for row in rows {
-            if row.outcome == "skipped" {
-                continue;
-            }
             if row.outcome == "completed"
                 && (row.scan_interface.as_deref() != Some(window.interface.as_str())
                     || row.scanned_at != Some(row.attempted_at))
@@ -281,12 +279,14 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
                 "completed" if row.replied => "reply",
                 "completed" => "miss",
                 "failed" => "failed",
+                "skipped" => "skipped",
                 _ => return Err("unsupported attempt outcome".into()),
             };
+            has_non_skipped |= outcome != "skipped";
             observations.push(Observation { at_ms, outcome });
             previous = Some(at_ms);
         }
-        if observations.is_empty() {
+        if !has_non_skipped {
             return Err(format!("no non-skipped attempts for {}", window.device_id));
         }
         traces.push(ReplayTrace {
@@ -301,7 +301,7 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
         .await
         .map_err(|e| format!("cannot finish export snapshot: {e}"))?;
     Ok(ReplayInput {
-        schema_version: 1,
+        schema_version: 2,
         dataset: study.dataset,
         policy: study.policy,
         traces,
@@ -347,7 +347,7 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[sqlx::test(migrations = "../../migrations")]
-    async fn exports_reply_miss_failure_and_omits_skip(db: PgPool) {
+    async fn exports_reply_miss_failure_and_skip(db: PgPool) {
         let start = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
         let mac = "aa:bb:cc:00:00:01";
         let policy = PresencePolicy {
@@ -395,6 +395,7 @@ mod tests {
         let output = export(&db, study).await.unwrap();
         presence_replay::replay_json(&serde_json::to_vec(&output).unwrap()).unwrap();
         let value = serde_json::to_value(output).unwrap();
+        assert_eq!(value["schema_version"], 2);
         assert_eq!(value["policy"]["offline_after_missed_scans"], 4);
         assert_eq!(value["policy"]["offline_after_secs"], 1200);
         assert_eq!(
@@ -402,7 +403,8 @@ mod tests {
             serde_json::json!([
                 { "at_ms": 0, "outcome": "reply" },
                 { "at_ms": 300000, "outcome": "miss" },
-                { "at_ms": 420000, "outcome": "failed" }
+                { "at_ms": 420000, "outcome": "failed" },
+                { "at_ms": 480000, "outcome": "skipped" }
             ])
         );
         assert_eq!(

@@ -68,6 +68,7 @@ pub(super) enum Outcome {
     Reply,
     Miss,
     Failed,
+    Skipped,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +145,7 @@ pub(super) struct Metrics {
     pub false_online_episodes: u64,
     pub completed_scans: u64,
     pub failed_scans: u64,
+    pub skipped_scans: u64,
 }
 
 #[derive(Default, Serialize)]

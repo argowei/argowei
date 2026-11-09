@@ -21,17 +21,19 @@ independent ground truth or establish field accuracy.
    and export if they change.
 5. Choose a window entirely after migration `0012`. Earlier scans have no
    recorded policy snapshot and cannot pass this provenance check. Failed scans
-   are retained. Skipped scheduler ticks are recorded but omitted from replay
-   because no scan ran. Database outages cannot be captured in the database;
-   document them as exclusions or explicitly uncertain windows. Export after
-   the run has stopped, before deleting inventory records. Completed scan
-   timestamps mark when results were stored, not when the ARP probe began.
+   and lock-contended attempts are retained as distinct outcomes in replay;
+   neither counts as a missed device reply. A stopped API or database outage
+   leaves no attempt row; the skip count cannot reveal those gaps. Document
+   them as exclusions or explicitly uncertain windows. Export after the run
+   has stopped, before deleting inventory records. Completed scan timestamps
+   mark when results were stored, not when the ARP probe began.
 
 ## Export
 
 Write a local `study.json` with the following shape. Times are UTC ISO 8601
 timestamps. The `end` boundary is exclusive. The MAC is used only for the
 local database lookup and is omitted from the generated replay file.
+The study file uses schema version 1; the exporter writes replay input version 2.
 
 ```json
 {
@@ -60,12 +62,13 @@ local database lookup and is omitted from the generated replay file.
 The example addresses and labels above are illustrative, not a measured
 dataset. Use a private study file for real MAC addresses and sensitive network
 metadata. The exporter rejects missing labels, empty observation windows,
-duplicate pseudonyms, unjournaled or inconsistently linked completed scans,
-and events that collapse to the same millisecond. It reads inventory, attempts,
-and sightings from one read-only database snapshot, so concurrent scans cannot
-produce a mixed export. A database outage that left no record still requires an
-operator-documented exclusion or `unknown` label. A policy mismatch or missing
-policy snapshot also stops the export; editing the study file cannot
+windows with only skipped attempts, duplicate pseudonyms, unjournaled or
+inconsistently linked completed scans, and events that collapse to the same
+millisecond. It reads inventory, attempts, and sightings from one read-only
+database snapshot, so concurrent scans cannot produce a mixed export. A
+database outage that left no record still requires an operator-documented
+exclusion or `unknown` label. A policy mismatch or missing policy snapshot
+also stops the export; editing the study file cannot
 retroactively establish which thresholds were used.
 
 ```sh

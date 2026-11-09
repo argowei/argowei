@@ -99,6 +99,31 @@ fn failed_scans_do_not_decide_even_when_the_time_threshold_has_passed() {
 }
 
 #[test]
+fn skipped_attempts_are_counted_without_changing_presence() {
+    let mut value = input();
+    value["schema_version"] = json!(2);
+    let trace = &mut value["traces"][0];
+    trace["duration_ms"] = json!(50000);
+    trace["observations"] = json!([
+        {"at_ms":0,"outcome":"reply"},
+        {"at_ms":5000,"outcome":"miss"},
+        {"at_ms":20000,"outcome":"skipped"},
+        {"at_ms":25000,"outcome":"miss"}
+    ]);
+    trace["ground_truth"] = json!([{"at_ms":0,"state":"online"}]);
+    value["policy"]["offline_after_missed_scans"] = json!(2);
+    let report = run(&value);
+    for result in &report.traces[0].methods[..3] {
+        assert_eq!(result.metrics.confusion.truth_online.online_ms, 25000);
+        assert_eq!(result.metrics.confusion.truth_online.offline_ms, 25000);
+        assert_eq!(result.metrics.completed_scans, 3);
+        assert_eq!(result.metrics.failed_scans, 0);
+        assert_eq!(result.metrics.skipped_scans, 1);
+    }
+    assert_eq!(report.aggregate[0].metrics.skipped_scans, 1);
+}
+
+#[test]
 fn unknown_predictions_and_labels_are_not_counted_as_online_or_offline() {
     let mut value = input();
     let trace = &mut value["traces"][0];
@@ -232,7 +257,7 @@ fn rejects_ambiguous_unknown_and_out_of_range_inputs() {
         *target = invalid;
         cases.push(value);
     };
-    change(&["schema_version"], json!(2));
+    change(&["schema_version"], json!(3));
     change(&["extra"], json!(true));
     change(&["dataset", "kind"], json!("real"));
     change(&["dataset", "ground_truth_source"], json!("  "));
@@ -243,6 +268,14 @@ fn rejects_ambiguous_unknown_and_out_of_range_inputs() {
     for value in cases {
         assert!(replay_json(&serde_json::to_vec(&value).unwrap()).is_err());
     }
+    let mut old_schema_with_skip = input();
+    old_schema_with_skip["traces"][0]["observations"][1]["outcome"] = json!("skipped");
+    assert!(
+        replay_json(&serde_json::to_vec(&old_schema_with_skip).unwrap())
+            .err()
+            .expect("v1 must reject skipped")
+            .contains("schema_version 2")
+    );
     let invalid_traces = [
         ("duration_ms", json!(0)),
         ("duration_ms", json!(u64::MAX)),
@@ -292,6 +325,8 @@ fn omitted_policy_uses_production_defaults_and_zero_time_is_supported() {
     let mut value = input();
     value.as_object_mut().unwrap().remove("policy");
     let report = run(&value);
+    assert_eq!(report.schema_version, 2);
+    assert_eq!(report.traces[0].methods[0].metrics.skipped_scans, 0);
     let production = PresencePolicy::default();
     assert_eq!(
         report.policy.offline_after_secs,

@@ -11,9 +11,9 @@ use chrono::{DateTime, Utc};
 pub use model::Report;
 use model::*;
 
-const METHODOLOGY: &str = "Intervals are [at_ms, next_event_ms), ending at duration_ms. Labels and observations at the same timestamp apply together. Prediction starts unknown until a reply; failed scans preserve state and miss count; only completed scans change predictions. An online-to-offline label transition starts a departure; an already-offline prediction detects it with zero delay. A return before detection is undetected; loss of labels or the trace ending before detection is censored. Delay p50/p95 use nearest-rank quantiles of detected departures only; undetected and censored counts are reported separately. Lab provenance is supplied by the recorder, not verified by this tool.";
+const METHODOLOGY: &str = "Intervals are [at_ms, next_event_ms), ending at duration_ms. Labels and observations at the same timestamp apply together. Prediction starts unknown until a reply; failed and skipped attempts preserve state and miss count; only completed scans change predictions. An online-to-offline label transition starts a departure; an already-offline prediction detects it with zero delay. A return before detection is undetected; loss of labels or the trace ending before detection is censored. Delay p50/p95 use nearest-rank quantiles of detected departures only; undetected and censored counts are reported separately. Lab provenance is supplied by the recorder, not verified by this tool.";
 
-/// Parse and validate v1 JSON, then replay all four methods without I/O.
+/// Parse and validate v1 or v2 JSON, then replay all four methods without I/O.
 pub fn replay_json(input: &[u8]) -> Result<Report, String> {
     let input: Input = serde_json::from_slice(input).map_err(|error| error.to_string())?;
     validate(&input)?;
@@ -49,7 +49,7 @@ pub fn replay_json(input: &[u8]) -> Result<Report, String> {
         })
         .collect();
     Ok(Report {
-        schema_version: 1,
+        schema_version: 2,
         dataset: input.dataset,
         policy: input.policy,
         methodology: METHODOLOGY,
@@ -59,8 +59,8 @@ pub fn replay_json(input: &[u8]) -> Result<Report, String> {
 }
 
 fn validate(input: &Input) -> Result<(), String> {
-    if input.schema_version != 1 {
-        return Err("schema_version must be 1".into());
+    if !matches!(input.schema_version, 1 | 2) {
+        return Err("schema_version must be 1 or 2".into());
     }
     for (name, value) in [
         ("dataset.id", &input.dataset.id),
@@ -100,6 +100,14 @@ fn validate(input: &Input) -> Result<(), String> {
             trace.duration_ms,
             trace.observations.iter().map(|event| event.at_ms),
         )?;
+        if input.schema_version == 1
+            && trace
+                .observations
+                .iter()
+                .any(|event| matches!(event.outcome, Outcome::Skipped))
+        {
+            return Err("skipped observations require schema_version 2".into());
+        }
         validate_times(
             "ground_truth",
             trace.duration_ms,
@@ -196,6 +204,7 @@ fn replay(trace: &Trace, config: Policy, method: Method) -> MethodReport {
         {
             match observation.outcome {
                 Outcome::Failed => metrics.failed_scans += 1,
+                Outcome::Skipped => metrics.skipped_scans += 1,
                 Outcome::Reply => {
                     metrics.completed_scans += 1;
                     last_seen = Some(at);
@@ -371,6 +380,7 @@ impl Metrics {
         self.false_online_episodes += other.false_online_episodes;
         self.completed_scans += other.completed_scans;
         self.failed_scans += other.failed_scans;
+        self.skipped_scans += other.skipped_scans;
     }
 }
 

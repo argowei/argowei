@@ -1,8 +1,8 @@
 {
   "artifact_version": 1,
-  "input_sha256": "7ac4ec96893397ad8c5486b556d4ebcd2aa4a594b725de0c6189251ab1e184ee",
+  "input_sha256": "9b191921f836a10fee76a7c988f22acf88c367dffdbcd3a8b81afae945726d33",
   "report": {
-    "schema_version": 1,
+    "schema_version": 2,
     "dataset": {
       "id": "synthetic-presence-replay-v1",
       "kind": "synthetic",
@@ -13,7 +13,7 @@
       "offline_after_missed_scans": 3,
       "offline_after_secs": 900
     },
-    "methodology": "Intervals are [at_ms, next_event_ms), ending at duration_ms. Labels and observations at the same timestamp apply together. Prediction starts unknown until a reply; failed scans preserve state and miss count; only completed scans change predictions. An online-to-offline label transition starts a departure; an already-offline prediction detects it with zero delay. A return before detection is undetected; loss of labels or the trace ending before detection is censored. Delay p50/p95 use nearest-rank quantiles of detected departures only; undetected and censored counts are reported separately. Lab provenance is supplied by the recorder, not verified by this tool.",
+    "methodology": "Intervals are [at_ms, next_event_ms), ending at duration_ms. Labels and observations at the same timestamp apply together. Prediction starts unknown until a reply; failed and skipped attempts preserve state and miss count; only completed scans change predictions. An online-to-offline label transition starts a departure; an already-offline prediction detects it with zero delay. A return before detection is undetected; loss of labels or the trace ending before detection is censored. Delay p50/p95 use nearest-rank quantiles of detected departures only; undetected and censored counts are reported separately. Lab provenance is supplied by the recorder, not verified by this tool.",
     "traces": [
       {
         "device_id": "sleep-and-scanner-outage",
@@ -40,7 +40,8 @@
               "false_offline_episodes": 1,
               "false_online_episodes": 0,
               "completed_scans": 6,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 1
             },
             "departures": [],
             "detection": {
@@ -72,7 +73,8 @@
               "false_offline_episodes": 1,
               "false_online_episodes": 0,
               "completed_scans": 6,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 1
             },
             "departures": [],
             "detection": {
@@ -104,7 +106,8 @@
               "false_offline_episodes": 1,
               "false_online_episodes": 0,
               "completed_scans": 6,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 1
             },
             "departures": [],
             "detection": {
@@ -136,7 +139,8 @@
               "false_offline_episodes": 2,
               "false_online_episodes": 0,
               "completed_scans": 6,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 1
             },
             "departures": [],
             "detection": {
@@ -175,7 +179,8 @@
               "false_offline_episodes": 1,
               "false_online_episodes": 2,
               "completed_scans": 8,
-              "failed_scans": 0
+              "failed_scans": 0,
+              "skipped_scans": 0
             },
             "departures": [
               {
@@ -221,7 +226,8 @@
               "false_offline_episodes": 1,
               "false_online_episodes": 2,
               "completed_scans": 8,
-              "failed_scans": 0
+              "failed_scans": 0,
+              "skipped_scans": 0
             },
             "departures": [
               {
@@ -267,7 +273,8 @@
               "false_offline_episodes": 1,
               "false_online_episodes": 2,
               "completed_scans": 8,
-              "failed_scans": 0
+              "failed_scans": 0,
+              "skipped_scans": 0
             },
             "departures": [
               {
@@ -312,7 +319,8 @@
               "false_offline_episodes": 1,
               "false_online_episodes": 2,
               "completed_scans": 8,
-              "failed_scans": 0
+              "failed_scans": 0,
+              "skipped_scans": 0
             },
             "departures": [
               {
@@ -364,7 +372,8 @@
               "false_offline_episodes": 0,
               "false_online_episodes": 1,
               "completed_scans": 3,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 0
             },
             "departures": [],
             "detection": {
@@ -396,7 +405,8 @@
               "false_offline_episodes": 0,
               "false_online_episodes": 1,
               "completed_scans": 3,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 0
             },
             "departures": [],
             "detection": {
@@ -428,7 +438,8 @@
               "false_offline_episodes": 0,
               "false_online_episodes": 1,
               "completed_scans": 3,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 0
             },
             "departures": [],
             "detection": {
@@ -460,7 +471,8 @@
               "false_offline_episodes": 0,
               "false_online_episodes": 1,
               "completed_scans": 3,
-              "failed_scans": 1
+              "failed_scans": 1,
+              "skipped_scans": 0
             },
             "departures": [],
             "detection": {
@@ -497,7 +509,8 @@
           "false_offline_episodes": 2,
           "false_online_episodes": 3,
           "completed_scans": 17,
-          "failed_scans": 2
+          "failed_scans": 2,
+          "skipped_scans": 1
         },
         "detection": {
           "departures": 2,
@@ -529,7 +542,8 @@
           "false_offline_episodes": 2,
           "false_online_episodes": 3,
           "completed_scans": 17,
-          "failed_scans": 2
+          "failed_scans": 2,
+          "skipped_scans": 1
         },
         "detection": {
           "departures": 2,
@@ -561,7 +575,8 @@
           "false_offline_episodes": 2,
           "false_online_episodes": 3,
           "completed_scans": 17,
-          "failed_scans": 2
+          "failed_scans": 2,
+          "skipped_scans": 1
         },
         "detection": {
           "departures": 2,
@@ -593,7 +608,8 @@
           "false_offline_episodes": 3,
           "false_online_episodes": 3,
           "completed_scans": 17,
-          "failed_scans": 2
+          "failed_scans": 2,
+          "skipped_scans": 1
         },
         "detection": {
           "departures": 2,

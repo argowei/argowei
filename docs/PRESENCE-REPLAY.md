@@ -26,11 +26,11 @@ diagnostic on stderr and exit status 1. No database, sockets, privileges, or
 wall clock are involved. `input_sha256` identifies the exact input bytes,
 including whitespace; it establishes reproducibility, not authenticity.
 
-## Input contract (version 1)
+## Input contract (version 2)
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "dataset": {
     "id": "example-only",
     "kind": "synthetic",
@@ -46,6 +46,7 @@ including whitespace; it establishes reproducibility, not authenticity.
       { "at_ms": 0, "outcome": "reply" },
       { "at_ms": 300000, "outcome": "miss" },
       { "at_ms": 600000, "outcome": "failed" },
+      { "at_ms": 750000, "outcome": "skipped" },
       { "at_ms": 900000, "outcome": "miss" }
     ],
     "ground_truth": [
@@ -59,6 +60,9 @@ including whitespace; it establishes reproducibility, not authenticity.
 - `dataset.kind` is `synthetic` or `lab`. The ID, description, and
   `ground_truth_source` are required nonempty provenance declarations. The
   tool cannot verify that labels were actually measured independently.
+- Version 1 inputs remain readable with their original `reply`, `miss`, and
+  `failed` outcomes. `skipped` requires version 2. Reports use schema version
+  2, including when replaying a version 1 input.
 - `policy` is optional; its defaults are 3 missed scans and 900 seconds. When
   present, both fields are required. The miss threshold must be positive;
   a zero time threshold is allowed.
@@ -71,9 +75,9 @@ including whitespace; it establishes reproducibility, not authenticity.
   schema versions, unknown fields, invalid enum values, duplicate identities,
   out-of-order events, and unrepresentable time ranges are rejected.
 - `reply` means a completed scan observed the device; `miss` means a completed
-  scan of that interface did not. `failed` means no usable scan result. Do
-  not convert failed or skipped scans into misses. A skipped attempt can be
-  omitted; a failed attempt is retained for the failure count.
+  scan of that interface did not. `failed` means the attempt produced no usable
+  scan result. `skipped` means no scan ran because the interface was
+  already busy. Both remain visible as separate counts and never become misses.
 - Ground truth is `online`, `offline`, or explicitly `unknown`. Before its
   first label it is unknown. A label applies until the next change or trace
   end. An observation and label at the same offset take effect together.
@@ -82,7 +86,7 @@ including whitespace; it establishes reproducibility, not authenticity.
 
 All methods begin with an **unknown prediction**, until the first reply.
 A reply sets online, resets consecutive misses, and updates last seen.
-Failed scans leave the prediction and miss count unchanged. Completed scans
+Failed and skipped attempts leave the prediction and miss count unchanged. Completed scans
 without a reply update the miss count and evaluate the method. Once offline,
 the prediction stays offline until a reply. Elapsed time alone never causes
 a state change between scan events; this matches production evaluation at
@@ -117,13 +121,16 @@ scans can change the miss count and therefore the predictions.
 | `metrics.confusion.unlabeled_ms` | Time with unknown reference state, excluded from correctness claims |
 | `metrics.false_offline_episodes` | Distinct intervals where the device is labeled online but predicted offline |
 | `metrics.false_online_episodes` | Distinct intervals where the device is labeled offline but predicted online |
-| `metrics.completed_scans`, `failed_scans` | Counts of usable and failed observations, respectively |
+| `metrics.completed_scans`, `failed_scans`, `skipped_scans` | Counts of usable scans, failed scans, and skipped attempts |
 | `departures` | Every observed `online` → `offline` label transition and its outcome |
 
 The six confusion cells plus `unlabeled_ms` partition the complete trace
 duration. Unknown predictions on known labels remain visible; they are
 neither counted correct nor silently discarded. Unknown labels interrupt
-error episodes.
+error episodes. Attempt counts are per device trace; aggregate counts sum those
+trace counts. A single interface-level skip included for two devices therefore
+contributes two to the aggregate `skipped_scans`, not two separate scheduler
+events.
 
 A departure is detected at the first offline prediction during that offline
 episode. An already offline prediction has delay zero; any preceding false
@@ -152,9 +159,9 @@ For a database-backed workflow, see the [presence lab protocol](PRESENCE-LAB.md)
    logs, or a serial log from an ESP32. Do not label presence from the same
    ARP replies being evaluated. Record clock alignment and its uncertainty;
    mark uncertain label windows as unknown.
-3. Capture successful scans, absent replies, and scanner failures separately.
-   Include sleep, actual disconnection, reconnection, and scanner outage;
-   retain failure cases. Keep the raw observation and reference logs so the
+3. Capture successful scans, absent replies, scanner failures, and skipped
+   attempts separately. Include sleep, actual disconnection, reconnection,
+   and scanner outage; retain failure cases. Keep raw observation and reference logs so the
    conversion to this format can be audited.
 4. Use pseudonymous IDs and document device classes, scan interval, collector
    version, experiment dates, labeling method, and trace exclusions alongside

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "dataset": {
     "id": "synthetic-presence-replay-v1",
     "kind": "synthetic",
@@ -19,6 +19,7 @@
         { "at_ms": 0, "outcome": "reply" },
         { "at_ms": 300000, "outcome": "miss" },
         { "at_ms": 600000, "outcome": "failed" },
+        { "at_ms": 750000, "outcome": "skipped" },
         { "at_ms": 900000, "outcome": "miss" },
         { "at_ms": 1200000, "outcome": "miss" },
         { "at_ms": 1500000, "outcome": "reply" },
