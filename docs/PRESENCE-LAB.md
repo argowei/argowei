@@ -61,10 +61,15 @@ The study file uses schema version 1; the exporter writes replay input version 2
 
 The example addresses and labels above are illustrative, not a measured
 dataset. Use a private study file for real MAC addresses and sensitive network
-metadata. The exporter rejects missing labels, empty observation windows,
-windows with only skipped attempts, duplicate pseudonyms, unjournaled or
-inconsistently linked completed scans, and events that collapse to the same
-millisecond. It reads inventory, attempts, and sightings from one read-only
+metadata. The exporter validates the study before reading the database: it
+rejects a non-`lab` or non-version-1 study, a non-positive miss threshold, blank
+dataset provenance, a trace whose end does not follow its start, blank or
+duplicate identifiers, missing ground-truth labels, labels that are not strictly
+increasing, and any event outside its half-open trace window. Against the
+database it further rejects empty observation windows, windows with only skipped
+attempts, unjournaled or inconsistently linked completed scans, events that
+collapse to the same millisecond, and a study policy that differs from or is
+missing the policy recorded with each scan. It reads inventory, attempts, and sightings from one read-only
 database snapshot, so concurrent scans cannot produce a mixed export. A
 database outage that left no record still requires an operator-documented
 exclusion or `unknown` label. A policy mismatch or missing policy snapshot

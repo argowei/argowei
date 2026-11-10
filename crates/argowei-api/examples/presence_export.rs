@@ -346,27 +346,37 @@ mod tests {
     use chrono::{Duration, TimeZone};
     use std::net::Ipv4Addr;
 
-    #[sqlx::test(migrations = "../../migrations")]
-    async fn exports_reply_miss_failure_and_skip(db: PgPool) {
-        let start = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
-        let mac = "aa:bb:cc:00:00:01";
-        let policy = PresencePolicy {
+    const MAC: &str = "aa:bb:cc:00:00:01";
+
+    fn start() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap()
+    }
+
+    fn policy() -> PresencePolicy {
+        PresencePolicy {
             offline_after_missed_scans: 4,
             offline_after: std::time::Duration::from_secs(1200),
-        };
+        }
+    }
+
+    /// A reply, a miss, a failed and a skipped attempt in one ten-minute window,
+    /// with a matching study. Each error test starts from this clean state and
+    /// mutates one thing, so the tests do not depend on each other's order.
+    async fn seed(db: &PgPool) -> serde_json::Value {
+        let start = start();
         record_scan(
-            &db,
+            db,
             "eth0",
             &[ObservedHost {
                 ip: Ipv4Addr::new(192, 168, 1, 10),
-                mac: mac.into(),
+                mac: MAC.into(),
             }],
             start,
-            &policy,
+            &policy(),
         )
         .await
         .unwrap();
-        record_scan(&db, "eth0", &[], start + Duration::minutes(5), &policy)
+        record_scan(db, "eth0", &[], start + Duration::minutes(5), &policy())
             .await
             .unwrap();
         for (minute, outcome, kind) in [(7, "failed", Some("scanner")), (8, "skipped", None)] {
@@ -377,22 +387,35 @@ mod tests {
             .bind(start + Duration::minutes(minute))
             .bind(outcome)
             .bind(kind)
-            .execute(&db)
+            .execute(db)
             .await
             .unwrap();
         }
-        let study_json = serde_json::json!({
+        serde_json::json!({
             "schema_version": 1,
             "dataset": { "id": "test", "kind": "lab", "description": "test window",
                 "ground_truth_source": "independent test label" },
             "policy": { "offline_after_missed_scans": 4, "offline_after_secs": 1200 },
-            "traces": [{ "device_id": "device-1", "mac_address": mac,
+            "traces": [{ "device_id": "device-1", "mac_address": MAC,
                 "interface": "eth0", "start": start,
                 "end": start + Duration::minutes(10),
                 "ground_truth": [{ "at": start, "state": "online" }] }]
-        });
-        let study: Study = serde_json::from_value(study_json.clone()).unwrap();
-        let output = export(&db, study).await.unwrap();
+        })
+    }
+
+    async fn export_error(db: &PgPool, study_json: serde_json::Value) -> String {
+        export(db, serde_json::from_value(study_json).unwrap())
+            .await
+            .err()
+            .expect("export should have failed")
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn exports_reply_miss_failure_and_skip(db: PgPool) {
+        let study_json = seed(&db).await;
+        let output = export(&db, serde_json::from_value(study_json).unwrap())
+            .await
+            .unwrap();
         presence_replay::replay_json(&serde_json::to_vec(&output).unwrap()).unwrap();
         let value = serde_json::to_value(output).unwrap();
         assert_eq!(value["schema_version"], 2);
@@ -409,90 +432,234 @@ mod tests {
         );
         assert_eq!(
             value["traces"][0]["ground_truth"],
-            serde_json::json!([
-                { "at_ms": 0, "state": "online" }
-            ])
+            serde_json::json!([{ "at_ms": 0, "state": "online" }])
         );
+        // The pseudonym travels; the real MAC never does.
         assert!(value.to_string().contains("device-1"));
-        assert!(!value.to_string().contains(mac));
+        assert!(!value.to_string().contains(MAC));
+    }
 
-        let mut wrong_policy = study_json.clone();
-        wrong_policy["policy"]["offline_after_missed_scans"] = serde_json::json!(3);
-        let study: Study = serde_json::from_value(wrong_policy).unwrap();
-        assert!(export(&db, study)
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_study_policy_that_differs_from_the_recorded_one(db: PgPool) {
+        let mut study_json = seed(&db).await;
+        study_json["policy"]["offline_after_missed_scans"] = serde_json::json!(3);
+        assert!(export_error(&db, study_json)
             .await
-            .err()
-            .unwrap()
             .contains("recorded presence policy differs"));
+    }
 
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_completed_scan_without_a_policy_snapshot(db: PgPool) {
+        let study_json = seed(&db).await;
         sqlx::query(
             "UPDATE scan_attempts SET offline_after_missed_scans = NULL, offline_after_secs = NULL \
              WHERE attempted_at = $1",
         )
-        .bind(start)
+        .bind(start())
         .execute(&db)
         .await
         .unwrap();
-        let study: Study = serde_json::from_value(study_json.clone()).unwrap();
-        assert!(export(&db, study)
+        assert!(export_error(&db, study_json)
             .await
-            .err()
-            .unwrap()
             .contains("no recorded presence policy"));
-        sqlx::query(
-            "UPDATE scan_attempts SET offline_after_missed_scans = 4, offline_after_secs = 1200 \
-             WHERE attempted_at = $1",
-        )
-        .bind(start)
-        .execute(&db)
-        .await
-        .unwrap();
+    }
 
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_completed_scan_without_an_attempt_record(db: PgPool) {
+        let study_json = seed(&db).await;
         sqlx::query(
             "INSERT INTO discovery_scans (interface, scanned_at, hosts_seen) \
                      VALUES ('eth0', $1, 0)",
         )
-        .bind(start + Duration::minutes(9))
+        .bind(start() + Duration::minutes(9))
         .execute(&db)
         .await
         .unwrap();
-        let study = serde_json::from_value(study_json.clone()).unwrap();
-        assert!(export(&db, study)
+        assert!(export_error(&db, study_json)
             .await
-            .err()
-            .unwrap()
             .contains("without attempt records"));
+    }
 
-        sqlx::query("DELETE FROM discovery_scans WHERE scanned_at = $1")
-            .bind(start + Duration::minutes(9))
-            .execute(&db)
-            .await
-            .unwrap();
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_completed_attempt_linked_to_a_different_interface(db: PgPool) {
+        let study_json = seed(&db).await;
         sqlx::query("UPDATE discovery_scans SET interface = 'wlan0' WHERE scanned_at = $1")
-            .bind(start)
+            .bind(start())
             .execute(&db)
             .await
             .unwrap();
-        let study: Study = serde_json::from_value(study_json.clone()).unwrap();
-        assert!(export(&db, study)
+        assert!(export_error(&db, study_json)
             .await
-            .err()
-            .unwrap()
             .contains("mismatched scan interface or timestamp"));
+    }
 
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_completed_attempt_linked_to_a_different_timestamp(db: PgPool) {
+        let study_json = seed(&db).await;
+        sqlx::query("UPDATE discovery_scans SET scanned_at = $1 WHERE scanned_at = $2")
+            .bind(start() - Duration::seconds(1))
+            .bind(start())
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(export_error(&db, study_json)
+            .await
+            .contains("mismatched scan interface or timestamp"));
+    }
+
+    /// A syntactically valid study whose input passes serde but can be mutated to
+    /// trip one input validation. These checks run before any database read, so
+    /// the error is about the study, not the inventory.
+    fn minimal_study() -> serde_json::Value {
+        let start = start();
+        serde_json::json!({
+            "schema_version": 1,
+            "dataset": { "id": "test", "kind": "lab", "description": "test window",
+                "ground_truth_source": "independent test label" },
+            "policy": { "offline_after_missed_scans": 4, "offline_after_secs": 1200 },
+            "traces": [{ "device_id": "device-1", "mac_address": MAC,
+                "interface": "eth0", "start": start,
+                "end": start + Duration::minutes(10),
+                "ground_truth": [{ "at": start, "state": "online" }] }]
+        })
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_study_that_is_not_a_lab_schema_1_window(db: PgPool) {
+        let mut study = minimal_study();
+        study["dataset"]["kind"] = serde_json::json!("synthetic");
+        assert!(export_error(&db, study)
+            .await
+            .contains("schema_version 1, dataset.kind lab"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_non_positive_miss_threshold(db: PgPool) {
+        let mut study = minimal_study();
+        study["policy"]["offline_after_missed_scans"] = serde_json::json!(0);
+        assert!(export_error(&db, study)
+            .await
+            .contains("offline_after_missed_scans must be positive"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_blank_dataset_provenance(db: PgPool) {
+        let mut study = minimal_study();
+        study["dataset"]["ground_truth_source"] = serde_json::json!("   ");
+        assert!(export_error(&db, study)
+            .await
+            .contains("dataset provenance fields must not be blank"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_trace_whose_end_precedes_its_start(db: PgPool) {
+        let mut study = minimal_study();
+        // end < start: a negative duration, which is the "end after start" check.
+        study["traces"][0]["end"] = serde_json::to_value(start() - Duration::minutes(1)).unwrap();
+        assert!(export_error(&db, study)
+            .await
+            .contains("trace end must be after start"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_zero_length_trace(db: PgPool) {
+        let mut study = minimal_study();
+        // end == start: a zero duration, caught by the positive-duration check.
+        study["traces"][0]["end"] = serde_json::to_value(start()).unwrap();
+        assert!(export_error(&db, study)
+            .await
+            .contains("trace duration must be positive"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_duplicate_device_pseudonyms(db: PgPool) {
+        // seed provides the inventory the first trace needs, so the export
+        // reaches the second trace and rejects the repeated device_id.
+        let study_json = seed(&db).await;
+        let mut study = study_json.clone();
+        let second = study["traces"][0].clone();
+        study["traces"].as_array_mut().unwrap().push(second);
+        assert!(export_error(&db, study)
+            .await
+            .contains("device IDs must be unique"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_non_increasing_ground_truth_labels(db: PgPool) {
+        let mut study = minimal_study();
+        let start = start();
+        study["traces"][0]["ground_truth"] = serde_json::json!([
+            { "at": start, "state": "online" },
+            { "at": start, "state": "offline" }
+        ]);
+        assert!(export_error(&db, study)
+            .await
+            .contains("ground-truth labels must strictly increase"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_label_outside_the_trace_window(db: PgPool) {
+        let mut study = minimal_study();
+        let start = start();
+        study["traces"][0]["ground_truth"] =
+            serde_json::json!([{ "at": start - Duration::minutes(1), "state": "online" }]);
+        assert!(export_error(&db, study)
+            .await
+            .contains("outside its half-open trace window"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_trace_without_ground_truth_labels(db: PgPool) {
+        let mut study = minimal_study();
+        study["traces"][0]["ground_truth"] = serde_json::json!([]);
+        assert!(export_error(&db, study)
+            .await
+            .contains("ground-truth labels are required"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_a_window_with_only_skipped_attempts(db: PgPool) {
+        // Seed a known device, then a window whose only attempt is skipped.
+        let study_json = seed(&db).await;
+        let late = start() + Duration::minutes(20);
         sqlx::query(
-            "UPDATE discovery_scans SET interface = 'eth0', scanned_at = $1 WHERE scanned_at = $2",
+            "INSERT INTO scan_attempts (interface, attempted_at, outcome) \
+                     VALUES ('eth0', $1, 'skipped')",
         )
-        .bind(start - Duration::seconds(1))
-        .bind(start)
+        .bind(late)
         .execute(&db)
         .await
         .unwrap();
-        let study: Study = serde_json::from_value(study_json).unwrap();
-        assert!(export(&db, study)
+        let mut study = study_json;
+        study["traces"][0]["start"] = serde_json::to_value(late).unwrap();
+        study["traces"][0]["end"] = serde_json::to_value(late + Duration::minutes(5)).unwrap();
+        study["traces"][0]["ground_truth"] = serde_json::json!([{ "at": late, "state": "online" }]);
+        assert!(export_error(&db, study)
             .await
-            .err()
-            .unwrap()
-            .contains("mismatched scan interface or timestamp"));
+            .contains("no non-skipped attempts"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_attempts_that_share_a_millisecond(db: PgPool) {
+        // Seed a device, then two failed attempts at the same instant.
+        let study_json = seed(&db).await;
+        let late = start() + Duration::minutes(20);
+        for _ in 0..2 {
+            sqlx::query(
+                "INSERT INTO scan_attempts (interface, attempted_at, outcome, failure_kind) \
+                         VALUES ('eth0', $1, 'failed', 'scanner')",
+            )
+            .bind(late)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+        let mut study = study_json;
+        study["traces"][0]["start"] = serde_json::to_value(late).unwrap();
+        study["traces"][0]["end"] = serde_json::to_value(late + Duration::minutes(5)).unwrap();
+        study["traces"][0]["ground_truth"] = serde_json::json!([{ "at": late, "state": "online" }]);
+        assert!(export_error(&db, study)
+            .await
+            .contains("share one millisecond"));
     }
 }
