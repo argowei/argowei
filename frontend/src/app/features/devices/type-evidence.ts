@@ -27,8 +27,8 @@ const KIND_LABELS: Record<Evidence['kind'], string> = {
       <ul class="evidence">
         @for (item of inferred.evidence; track $index) {
           <li>
-            <strong>{{ kindLabels[item.kind] }}</strong
-            >: {{ item.detail }} → {{ typeLabels[item.type] }}
+            <strong>{{ kindLabels[item.kind] }}</strong>: {{ item.detail }} →
+            {{ typeLabels[item.type] }}
             <span class="muted">(+{{ item.weight }} %)</span>
           </li>
         }

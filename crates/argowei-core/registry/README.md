@@ -14,8 +14,8 @@ nmap and the `hwdata` package all ship it). Argowei stores only the prefix and
 organization name, not the registrants' addresses. If you redistribute Argowei
 in a setting where this matters, review the IEEE terms for the registry.
 
-The current file was generated from the `hwdata` package's copy of `oui.txt`
-(the header of `oui.tsv` records the source file and date).
+The current file was downloaded directly from IEEE; the header of `oui.tsv`
+records the source URL and generation date.
 
 ## Updating
 

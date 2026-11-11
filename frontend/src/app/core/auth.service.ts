@@ -4,9 +4,7 @@ import { Observable, catchError, map, of, switchMap, tap, throwError } from 'rxj
 import { API_BASE } from './api';
 
 export type Session =
-  | { kind: 'setup' }
-  | { kind: 'anonymous' }
-  | { kind: 'authenticated'; username: string };
+  { kind: 'setup' } | { kind: 'anonymous' } | { kind: 'authenticated'; username: string };
 
 interface StatusResponse {
   setup_required: boolean;
@@ -31,18 +29,15 @@ export class AuthService {
     }
 
     return this.http.get<StatusResponse>(`${API_BASE}/auth/status`).pipe(
-      switchMap(
-        ({ setup_required }): Observable<Session> =>
-          setup_required
-            ? of({ kind: 'setup' })
-            : this.http.get<UserResponse>(`${API_BASE}/auth/me`).pipe(
-                map(({ username }): Session => ({ kind: 'authenticated', username })),
-                catchError((error: HttpErrorResponse) =>
-                  error.status === 401
-                    ? of<Session>({ kind: 'anonymous' })
-                    : throwError(() => error),
-                ),
+      switchMap(({ setup_required }): Observable<Session> =>
+        setup_required
+          ? of({ kind: 'setup' })
+          : this.http.get<UserResponse>(`${API_BASE}/auth/me`).pipe(
+              map(({ username }): Session => ({ kind: 'authenticated', username })),
+              catchError((error: HttpErrorResponse) =>
+                error.status === 401 ? of<Session>({ kind: 'anonymous' }) : throwError(() => error),
               ),
+            ),
       ),
       tap((session) => this.session.set(session)),
     );
