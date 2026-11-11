@@ -82,6 +82,12 @@ Linux host; discovery otherwise stays disabled. The container runs as the
 unprivileged `argowei` user with `CAP_NET_RAW` on its executable and
 `no-new-privileges` enabled; the capability bounding set contains only
 `NET_RAW`.
+Compose builds Angular once and serves the static files from an unprivileged
+Nginx container on port 4200. It proxies `/api` to the backend while preserving
+the browser's `Host` header for the API's Origin check. The Compose frontend
+has no source bind mount and does not run the Angular development server.
+Keep `ARGOWEI_BIND_ADDRESS` reachable from the Compose bridge network; binding
+the API to `127.0.0.1` prevents the frontend container from proxying to it.
 Verify an actual scan on your chosen interface before relying on the inventory.
 If you use a DHCP lease file, mount it read-only in the backend and set
 `ARGOWEI_DHCP_LEASES_FILE` to its **container** path.

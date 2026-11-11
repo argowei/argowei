@@ -64,16 +64,20 @@ services:
   frontend:
     build:
       context: ./frontend
-    environment:
-      # The backend is on the host network, not on the compose network.
-      API_PROXY_TARGET: http://host.docker.internal:8000
+    # The backend is on the host network, not on the compose network.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "4200:4200"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "4200:8080"
+    # Static files and a reverse proxy need no privileges and no writable
+    # image; Nginx keeps its pid file and temp files in /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - backend
 

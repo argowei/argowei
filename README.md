@@ -30,7 +30,7 @@ Screenshot of the running dashboard with [synthetic demo data](docs/demo-data.sq
 
 ## Get started
 
-Choose a setup in the [deployment guide](docs/DEPLOYMENT.md). Docker Compose uses host networking for LAN discovery and is intended for Linux. The API applies pending database migrations at startup. After setup, open the dashboard at <http://localhost:4200>; the API runs at <http://localhost:8000/api>. On first launch, the API logs a setup token for the initial admin account.
+Choose a setup in the [deployment guide](docs/DEPLOYMENT.md). Docker Compose uses host networking for LAN discovery and is intended for Linux. It serves a production frontend build on <http://localhost:4200>, with `/api` proxied to the backend on port 8000. The API applies pending database migrations at startup. On first launch, it logs a setup token for the initial admin account.
 
 Discovery is disabled until you configure an interface. The [technical reference](docs/TECHNICAL-REFERENCE.md#scheduled-discovery) shows the settings and required permissions.
 

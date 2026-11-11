@@ -39,3 +39,53 @@ jobs:
 
       - name: Build images
         run: docker compose build
+
+      - name: Smoke-test the served frontend and API proxy
+        run: |
+          docker compose up -d --no-build
+          base=http://localhost:4200
+
+          healthy=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent "$base/api/health" | grep -q '"database":"ok"'; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          "$healthy" || { echo "API did not become healthy behind the proxy" >&2; exit 1; }
+
+          curl --fail --silent --show-error "$base/api" | grep -q '"name":"Argowei API"'
+
+          # The app entry point is served for the root and for deep links.
+          curl --fail --silent --show-error "$base/" -o /tmp/argowei-index.html
+          curl --fail --silent --show-error "$base/devices/123" -o /tmp/argowei-deep-link.html
+          cmp /tmp/argowei-index.html /tmp/argowei-deep-link.html
+          grep -q '<title>Argowei</title>' /tmp/argowei-index.html
+
+          # Fingerprinted bundles are cached, the entry point is revalidated,
+          # and a missing bundle is a 404 rather than the entry point.
+          bundle="$(grep -o 'main-[A-Za-z0-9_-]*\.js' /tmp/argowei-index.html | head -n 1)"
+          curl --fail --silent --show-error --head "$base/$bundle" | grep -qi '^cache-control: .*immutable'
+          curl --fail --silent --show-error --head "$base/" | grep -qi '^cache-control: no-cache'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$base/missing-00000000.js")" = 404
+
+          # The proxy preserves Host, so the API's Origin check accepts the
+          # dashboard's own origin and still refuses a foreign one.
+          login() {
+            curl --silent --output /dev/null --write-out '%{http_code}' \
+              --request POST --header 'Content-Type: application/json' \
+              --header "Origin: $1" --data '{}' "$base/api/auth/login"
+          }
+          test "$(login "$base")" != 403
+          test "$(login http://attacker.example)" = 403
+
+      - name: Show container logs
+        if: failure()
+        run: |
+          docker compose logs --no-color |
+            sed -E 's/(first-run setup token: )[A-Za-z0-9_-]+/\1[REDACTED]/g'
+
+      - name: Stop test stack
+        if: always()
+        run: docker compose down -v --remove-orphans

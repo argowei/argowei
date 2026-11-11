@@ -1,2 +1,2 @@
-/** Where the API lives; the dev server proxies it, nginx in production. */
+/** The dev server and the Compose web server both proxy this same-origin path. */
 export const API_BASE = '/api';
