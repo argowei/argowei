@@ -14,6 +14,7 @@ function scan(overrides: Partial<Scan> = {}): Scan {
     profile: 'quick',
     status: 'completed',
     requested_by: 'admin',
+    schedule_id: null,
     created_at: new Date(Date.now() - 120_000).toISOString(),
     started_at: new Date(Date.now() - 110_000).toISOString(),
     finished_at: new Date(Date.now() - 100_000).toISOString(),

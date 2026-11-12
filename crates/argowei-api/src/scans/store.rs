@@ -43,6 +43,8 @@ pub struct Scan {
     /// `queued`, `running`, `completed`, `failed`, `cancelled` or `timed_out`.
     pub status: String,
     pub requested_by: String,
+    /// The schedule that queued it; `null` when a user started it.
+    pub schedule_id: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
@@ -66,7 +68,7 @@ pub struct ScanPort {
 }
 
 const SELECT_SCAN: &str = "SELECT s.id, s.device_id, s.target_ip, s.profile, s.status, \
-        s.requested_by, s.created_at, s.started_at, s.finished_at, s.error, s.nmap_version, \
+        s.requested_by, s.schedule_id, s.created_at, s.started_at, s.finished_at, s.error, s.nmap_version, \
         (SELECT count(*) FROM scan_ports p WHERE p.scan_id = s.id AND p.state = 'open') \
             AS open_ports \
     FROM scans s";
@@ -77,15 +79,17 @@ pub async fn insert_queued<'e, E: PgExecutor<'e>>(
     target_ip: &str,
     profile: ScanProfile,
     requested_by: &str,
+    schedule_id: Option<i32>,
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar(
-        "INSERT INTO scans (device_id, target_ip, profile, requested_by) \
-         VALUES ($1, $2, $3, $4) RETURNING id",
+        "INSERT INTO scans (device_id, target_ip, profile, requested_by, schedule_id) \
+         VALUES ($1, $2, $3, $4, $5) RETURNING id",
     )
     .bind(device_id)
     .bind(target_ip)
     .bind(profile.as_str())
     .bind(requested_by)
+    .bind(schedule_id)
     .fetch_one(executor)
     .await
 }

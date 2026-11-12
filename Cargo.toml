@@ -21,6 +21,7 @@ axum-extra = { version = "0.9", features = ["cookie"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+croner = "4"
 dotenvy = "0.15"
 http-body-util = "0.1"
 pnet = "0.35"

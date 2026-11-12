@@ -31,7 +31,10 @@ export interface Scan {
   target_ip: string;
   profile: ScanProfile;
   status: ScanStatus;
+  /** A user name, or `system` for scans a schedule started. */
   requested_by: string;
+  /** The schedule that started it; `null` when started by hand. */
+  schedule_id: number | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

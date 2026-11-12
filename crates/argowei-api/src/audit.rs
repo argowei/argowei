@@ -26,6 +26,9 @@ use crate::state::AppState;
 /// Actor recorded when no authenticated user is involved.
 pub const ANONYMOUS: &str = "anonymous";
 
+/// Actor recorded for what Argowei does on its own, such as scheduled scans.
+pub const SYSTEM: &str = "system";
+
 const DEFAULT_PAGE_SIZE: i64 = 50;
 const MAX_PAGE_SIZE: i64 = 200;
 

@@ -11,7 +11,7 @@ RUN cargo build --release --locked -p argowei-api
 FROM debian:trixie-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libcap2-bin nmap \
+    && apt-get install -y --no-install-recommends ca-certificates libcap2-bin nmap tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

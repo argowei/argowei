@@ -18,6 +18,8 @@ pub struct AppState {
     pub discovery: DiscoveryStatus,
     /// Runs port scans in the background.
     pub scans: ScanRunner,
+    /// Wakes the scan scheduler when a schedule changes.
+    pub schedule_changed: Arc<tokio::sync::Notify>,
 }
 
 impl AppState {
@@ -43,6 +45,7 @@ impl AppState {
             auth: Arc::new(auth),
             discovery: DiscoveryStatus::default(),
             scans: ScanRunner::new(ScanConfig::default()),
+            schedule_changed: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
