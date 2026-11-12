@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 use crate::auth::AuthState;
 use crate::config::Settings;
 use crate::discovery::DiscoveryStatus;
+use crate::scans::{ScanConfig, ScanRunner};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -15,6 +16,8 @@ pub struct AppState {
     pub auth: Arc<AuthState>,
     /// In-memory outcome of the latest discovery scans (not persisted).
     pub discovery: DiscoveryStatus,
+    /// Runs port scans in the background.
+    pub scans: ScanRunner,
 }
 
 impl AppState {
@@ -31,7 +34,7 @@ impl AppState {
             chrono::Duration::hours(settings.session_ttl_hours),
         );
 
-        Self::new(db, auth)
+        Self::new(db, auth).with_scan_config(ScanConfig::from(settings))
     }
 
     pub fn new(db: sqlx::PgPool, auth: AuthState) -> Self {
@@ -39,6 +42,13 @@ impl AppState {
             db,
             auth: Arc::new(auth),
             discovery: DiscoveryStatus::default(),
+            scans: ScanRunner::new(ScanConfig::default()),
         }
+    }
+
+    /// Replaces how port scans run (the nmap binary, limits, allowed ranges).
+    pub fn with_scan_config(mut self, config: ScanConfig) -> Self {
+        self.scans = ScanRunner::new(config);
+        self
     }
 }

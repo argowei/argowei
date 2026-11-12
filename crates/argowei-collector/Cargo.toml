@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 argowei-core.workspace = true
 pnet.workspace = true
+roxmltree.workspace = true
 tracing.workspace = true

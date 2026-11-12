@@ -10,13 +10,20 @@ export type Severity = (typeof SEVERITIES)[number];
 
 /** Types the dashboard knows how to describe; others are shown by name. */
 export type KnownEventType =
-  'device.discovered' | 'device.online' | 'device.offline' | 'device.named';
+  | 'device.discovered'
+  | 'device.online'
+  | 'device.offline'
+  | 'device.named'
+  | 'scan.completed'
+  | 'scan.failed';
 
 export const EVENT_TYPE_LABELS: Record<KnownEventType, string> = {
   'device.discovered': 'Discovered',
   'device.online': 'Online',
   'device.offline': 'Offline',
   'device.named': 'Named',
+  'scan.completed': 'Scanned',
+  'scan.failed': 'Scan failed',
 };
 
 export interface TimelineEvent {

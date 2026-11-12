@@ -41,9 +41,37 @@ export function describeEvent(event: TimelineEvent): string {
         source && NAME_SOURCE_LABELS[source] ? ` (from ${NAME_SOURCE_LABELS[source]})` : '';
       return from && to ? `Renamed from "${from}" to "${to}"${via}.` : 'Name changed.';
     }
+    case 'scan.completed': {
+      const ports = Array.isArray(p['open_ports'])
+        ? p['open_ports'].filter((n): n is number => typeof n === 'number')
+        : null;
+      const found =
+        ports === null
+          ? ''
+          : ports.length
+            ? `: open ${ports.length === 1 ? 'port' : 'ports'} ${ports.join(', ')}`
+            : ': no open ports';
+      return `${profileName(text('profile'))} scan of ${text('target') ?? 'the device'}${found}.`;
+    }
+    case 'scan.failed': {
+      const outcome = text('outcome');
+      const how =
+        outcome === 'cancelled'
+          ? 'was cancelled'
+          : outcome === 'timed_out'
+            ? 'timed out'
+            : 'failed';
+      const error = outcome === 'failed' && text('error') ? `: ${text('error')}` : '';
+      return `${profileName(text('profile'))} scan of ${text('target') ?? 'the device'} ${how}${error}.`;
+    }
     default:
       return eventTypeLabel(event.type);
   }
+}
+
+/** "Quick", "Service", "Full", or "Port" for an unknown profile. */
+function profileName(profile: string | null): string {
+  return profile ? profile.charAt(0).toUpperCase() + profile.slice(1) : 'Port';
 }
 
 /** "45 s", "15 min", "3 h", "2 d". */

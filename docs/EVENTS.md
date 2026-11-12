@@ -25,6 +25,8 @@ shape. Check `(type, schema_version)` before interpreting a payload.
 | `device.online` | 1 | info | A device answers again after being marked offline. |
 | `device.offline` | 1 | info | A device missed enough scans, for long enough (see presence). |
 | `device.named` | 1 | info | The name shown for a device changed. |
+| `scan.completed` | 1 | info | A port scan finished; its result is stored. |
+| `scan.failed` | 1 | info | A port scan ended without a result (failed, timed out, cancelled). |
 
 ### `device.discovered` (v1)
 
@@ -63,6 +65,26 @@ shape. Check `(type, schema_version)` before interpreting a payload.
 | `to` | string | The new name. |
 | `source` | `dhcp` \| `mdns` \| `netbios` \| `rdns` | Where the new name comes from. |
 | `answers` | array of `{source, name}` | Every source's current answer. |
+
+### `scan.completed` (v1)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `scan_id` | integer | The scan; full result at `GET /api/scans/{scan_id}`. |
+| `profile` | `quick` \| `service` \| `full` | The scan profile. |
+| `target` | string | The address that was scanned. |
+| `open_ports` | array of integers | Open TCP ports found, ascending. |
+| `duration_secs` | number | nmap's run time in seconds. |
+
+### `scan.failed` (v1)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `scan_id` | integer | The scan. |
+| `profile` | `quick` \| `service` \| `full` | The scan profile. |
+| `target` | string | The address it was meant to scan. |
+| `outcome` | `failed` \| `timed_out` \| `cancelled` | How it ended. |
+| `error` | string | What went wrong, in words. |
 
 ## Reading the timeline
 

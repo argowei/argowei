@@ -45,6 +45,16 @@ pub struct Settings {
     /// How long after an interface's first scan new devices are still learned
     /// silently instead of raising an alert. 0 = only the first scan.
     pub baseline_window_secs: u64,
+
+    /// The nmap binary for port scans (a name on `PATH` or a full path).
+    pub nmap_path: String,
+    /// Port scans running at once, across all devices and schedules.
+    pub scan_concurrency: usize,
+    /// Ranges port scans may target; always inside the local ranges.
+    pub scan_targets: argowei_core::scan_target::ScanTargets,
+    /// Upper bound on a scan's run time in seconds, on top of each profile's
+    /// own limit; 0 keeps the profile limits.
+    pub scan_max_secs: u64,
 }
 
 impl Settings {
@@ -90,6 +100,18 @@ impl Settings {
                 as u32,
             offline_after_secs: bounded("ARGOWEI_OFFLINE_AFTER_SECS", 900, 0, 604_800),
             baseline_window_secs: bounded("ARGOWEI_BASELINE_WINDOW_SECS", 0, 0, 2_592_000),
+
+            nmap_path: Some(env_or("ARGOWEI_NMAP_PATH", "nmap"))
+                .map(|path| path.trim().to_owned())
+                .filter(|path| !path.is_empty())
+                .unwrap_or_else(|| "nmap".to_owned()),
+            scan_concurrency: bounded("ARGOWEI_SCAN_CONCURRENCY", 2, 1, 8) as usize,
+            scan_targets: argowei_core::scan_target::ScanTargets::parse_list(&env_or(
+                "ARGOWEI_SCAN_ALLOWED_RANGES",
+                "",
+            ))
+            .unwrap_or_else(|error| panic!("ARGOWEI_SCAN_ALLOWED_RANGES: {error}")),
+            scan_max_secs: bounded("ARGOWEI_SCAN_MAX_SECS", 0, 0, 7_200),
         }
     }
 

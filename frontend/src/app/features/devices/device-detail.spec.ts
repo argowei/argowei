@@ -4,6 +4,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Device } from '../../core/device.models';
 import { device, group, providePageTesting, sleep } from '../../testing';
 import { DeviceDetail, diff } from './device-detail';
+import { SCAN_POLL_MS } from '../../core/scans.service';
 
 const stored = device({
   id: 7,
@@ -79,7 +80,7 @@ describe('DeviceDetail', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [...providePageTesting()],
+      providers: [...providePageTesting(), { provide: SCAN_POLL_MS, useValue: 0 }],
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -261,7 +262,7 @@ describe('DeviceDetail', () => {
     ).toBe('IoT');
   });
 
-  it('offers tabs for features that are still to come, disabled', async () => {
+  it('has Overview and Scans tabs, and disabled ones for features still to come', async () => {
     const { el } = await render();
     const tabs = Array.from(el.querySelectorAll<HTMLButtonElement>('[role=tab]'));
 
@@ -273,7 +274,22 @@ describe('DeviceDetail', () => {
       'Policy',
     ]);
     expect(tabs[0].getAttribute('aria-selected')).toBe('true');
-    expect(tabs.slice(1).every((t) => t.disabled)).toBe(true);
+    expect(tabs[1].disabled).toBe(false);
+    expect(tabs.slice(2).every((t) => t.disabled)).toBe(true);
+  });
+
+  it('switches to the Scans tab and loads the device scans', async () => {
+    const { fixture, el } = await render();
+    const scansTab = el.querySelector<HTMLButtonElement>('#tab-scans')!;
+    scansTab.click();
+    fixture.detectChanges();
+    await sleep();
+
+    expect(scansTab.getAttribute('aria-selected')).toBe('true');
+    expect(el.querySelector('#panel-overview')).toBeNull();
+    http.expectOne('/api/devices/7/scans').flush([]);
+    fixture.detectChanges();
+    expect(el.querySelector('#panel-scans')?.textContent).toContain('not been scanned yet');
   });
 
   it('keeps Save disabled until something changes', async () => {

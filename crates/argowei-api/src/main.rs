@@ -9,6 +9,7 @@ use argowei_api::config::Settings;
 use argowei_api::discovery::{self, ArpScanner, DiscoveryConfig, InterfaceLocks};
 use argowei_api::names::NamePipeline;
 use argowei_api::routes;
+use argowei_api::scans;
 use argowei_api::state::AppState;
 use tokio::net::TcpListener;
 
@@ -24,6 +25,11 @@ async fn main() {
         .await
         .expect("database migrations failed");
     state.auth.init_setup_token(&state.db).await;
+    match scans::store::fail_interrupted(&state.db).await {
+        Ok(0) => {}
+        Ok(count) => tracing::warn!(count, "marked scans interrupted by the restart as failed"),
+        Err(error) => tracing::error!(%error, "could not clean up interrupted scans"),
+    }
     if let Err(error) = alerts::apply_baseline_window(
         &state.db,
         std::time::Duration::from_secs(settings.baseline_window_secs),

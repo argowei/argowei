@@ -19,11 +19,19 @@ import { Group } from '../../core/group.models';
 import { StatusIndicator } from '../../shared/status-indicator';
 import { TimeAgoPipe } from '../../shared/time-ago.pipe';
 import { AddressTable } from './address-table';
+import { DeviceScans } from './device-scans';
 import { NameSources } from './name-sources';
 import { TypeEvidence } from './type-evidence';
 
-/** Tabs that later features will fill in (scans, DNS, CVEs, policy). */
-const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
+/** Tabs that later features will fill in (DNS, CVEs, policy). */
+const FUTURE_TABS = ['DNS', 'CVEs', 'Policy'];
+
+/** The sections a device page has today. */
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'scans', label: 'Scans' },
+] as const;
+type Tab = (typeof TABS)[number]['id'];
 
 /**
  * One device: the user's edits (label, group, type, trust, notes) on the
@@ -40,6 +48,7 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
     TypeEvidence,
     AddressTable,
     NameSources,
+    DeviceScans,
   ],
   template: `
     <section class="page">
@@ -59,7 +68,20 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
         </header>
 
         <div class="tabs" role="tablist" aria-label="Device sections">
-          <button type="button" role="tab" aria-selected="true" class="tab active">Overview</button>
+          @for (t of tabs; track t.id) {
+            <button
+              type="button"
+              role="tab"
+              class="tab"
+              [id]="'tab-' + t.id"
+              [attr.aria-controls]="'panel-' + t.id"
+              [attr.aria-selected]="tab() === t.id"
+              [class.active]="tab() === t.id"
+              (click)="tab.set(t.id)"
+            >
+              {{ t.label }}
+            </button>
+          }
           @for (tab of futureTabs; track tab) {
             <button type="button" role="tab" class="tab" disabled title="Coming soon">
               {{ tab }}
@@ -67,141 +89,152 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
           }
         </div>
 
-        <div class="grid">
-          <form class="card" (ngSubmit)="save()" aria-labelledby="edit-title">
-            <h2 id="edit-title">Details</h2>
+        @if (tab() === 'scans') {
+          <app-device-scans
+            role="tabpanel"
+            id="panel-scans"
+            aria-labelledby="tab-scans"
+            [deviceId]="d.id"
+          />
+        } @else {
+          <div class="grid" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+            <form class="card" (ngSubmit)="save()" aria-labelledby="edit-title">
+              <h2 id="edit-title">Details</h2>
 
-            <label for="label">Label</label>
-            <input
-              id="label"
-              name="label"
-              maxlength="64"
-              autocomplete="off"
-              [placeholder]="d.name"
-              [ngModel]="form().label"
-              (ngModelChange)="patchForm({ label: $event })"
-            />
-            <p class="hint">
-              Shown instead of the discovered name ({{ d.name }}{{ nameNote(d) }}).
-            </p>
+              <label for="label">Label</label>
+              <input
+                id="label"
+                name="label"
+                maxlength="64"
+                autocomplete="off"
+                [placeholder]="d.name"
+                [ngModel]="form().label"
+                (ngModelChange)="patchForm({ label: $event })"
+              />
+              <p class="hint">
+                Shown instead of the discovered name ({{ d.name }}{{ nameNote(d) }}).
+              </p>
 
-            <label for="group">Group</label>
-            <select
-              id="group"
-              name="group"
-              [ngModel]="form().group"
-              (ngModelChange)="patchForm({ group: $event })"
-            >
-              @for (group of groups(); track group.id) {
-                <option [ngValue]="group.id">{{ group.name }}</option>
-              }
-            </select>
-
-            <label for="type">Device type</label>
-            <select
-              id="type"
-              name="type"
-              [ngModel]="form().type"
-              (ngModelChange)="patchForm({ type: $event })"
-            >
-              <option [ngValue]="null">{{ automaticLabel(d) }}</option>
-              @for (type of deviceTypes; track type) {
-                <option [ngValue]="type">{{ typeLabels[type] }}</option>
-              }
-            </select>
-            <p class="hint">
-              Pick a type to override the automatic guess; "Automatic" goes back to it.
-            </p>
-
-            <label for="trust">Trust level</label>
-            <select
-              id="trust"
-              name="trust"
-              [ngModel]="form().trust"
-              (ngModelChange)="patchForm({ trust: $event })"
-            >
-              @for (level of trustLevels; track level) {
-                <option [ngValue]="level">{{ level }}</option>
-              }
-            </select>
-
-            <label for="notes">Notes</label>
-            <textarea
-              id="notes"
-              name="notes"
-              rows="5"
-              maxlength="2000"
-              [ngModel]="form().notes"
-              (ngModelChange)="patchForm({ notes: $event })"
-            ></textarea>
-
-            @if (saveError()) {
-              <p class="error" role="alert">{{ saveError() }}</p>
-            }
-            @if (saved()) {
-              <p class="ok" role="status">Saved.</p>
-            }
-            <div class="actions">
-              <button type="submit" [disabled]="!dirty() || saving()">
-                {{ saving() ? 'Saving…' : 'Save' }}
-              </button>
-              <button
-                type="button"
-                class="secondary"
-                [disabled]="!dirty() || saving()"
-                (click)="reset()"
+              <label for="group">Group</label>
+              <select
+                id="group"
+                name="group"
+                [ngModel]="form().group"
+                (ngModelChange)="patchForm({ group: $event })"
               >
-                Reset
-              </button>
-            </div>
-          </form>
-
-          <div class="card">
-            <h2>Profile</h2>
-            <dl>
-              <dt>MAC address</dt>
-              <dd>
-                <code>{{ d.mac_address }}</code>
-                @if (d.locally_administered_mac) {
-                  <span
-                    class="pill"
-                    title="Not assigned by a manufacturer: usually MAC randomization, but also used by virtual interfaces"
-                    >private MAC</span
-                  >
+                @for (group of groups(); track group.id) {
+                  <option [ngValue]="group.id">{{ group.name }}</option>
                 }
-              </dd>
-              <dt>Type</dt>
-              <dd>
-                {{ typeLabels[d.device_type] }}
-                <span class="pill">{{
-                  d.type_source === 'manual' ? 'set by you' : d.inferred.confidence + ' % sure'
-                }}</span>
-              </dd>
-              <dt>Manufacturer</dt>
-              <dd>
-                {{ d.vendor ?? (d.locally_administered_mac ? 'Unknown (private MAC)' : 'Unknown') }}
-              </dd>
-              <dt>First seen</dt>
-              <dd [title]="d.first_seen">{{ d.first_seen | timeAgo }}</dd>
-              <dt>Last seen</dt>
-              <dd [title]="d.last_seen">{{ d.last_seen | timeAgo }}</dd>
-            </dl>
+              </select>
 
-            <h2>Why this type?</h2>
-            <app-type-evidence [device]="d" />
+              <label for="type">Device type</label>
+              <select
+                id="type"
+                name="type"
+                [ngModel]="form().type"
+                (ngModelChange)="patchForm({ type: $event })"
+              >
+                <option [ngValue]="null">{{ automaticLabel(d) }}</option>
+                @for (type of deviceTypes; track type) {
+                  <option [ngValue]="type">{{ typeLabels[type] }}</option>
+                }
+              </select>
+              <p class="hint">
+                Pick a type to override the automatic guess; "Automatic" goes back to it.
+              </p>
 
-            <h2>Addresses</h2>
-            <app-address-table [addresses]="d.addresses" />
+              <label for="trust">Trust level</label>
+              <select
+                id="trust"
+                name="trust"
+                [ngModel]="form().trust"
+                (ngModelChange)="patchForm({ trust: $event })"
+              >
+                @for (level of trustLevels; track level) {
+                  <option [ngValue]="level">{{ level }}</option>
+                }
+              </select>
 
-            <h2>Discovered names</h2>
-            <app-name-sources [device]="d" />
+              <label for="notes">Notes</label>
+              <textarea
+                id="notes"
+                name="notes"
+                rows="5"
+                maxlength="2000"
+                [ngModel]="form().notes"
+                (ngModelChange)="patchForm({ notes: $event })"
+              ></textarea>
 
-            <h2>History</h2>
-            <p>
-              <a routerLink="/events" [queryParams]="{ device: d.id }">Events for this device</a>
-            </p>
+              @if (saveError()) {
+                <p class="error" role="alert">{{ saveError() }}</p>
+              }
+              @if (saved()) {
+                <p class="ok" role="status">Saved.</p>
+              }
+              <div class="actions">
+                <button type="submit" [disabled]="!dirty() || saving()">
+                  {{ saving() ? 'Saving…' : 'Save' }}
+                </button>
+                <button
+                  type="button"
+                  class="secondary"
+                  [disabled]="!dirty() || saving()"
+                  (click)="reset()"
+                >
+                  Reset
+                </button>
+              </div>
+            </form>
+
+            <div class="card">
+              <h2>Profile</h2>
+              <dl>
+                <dt>MAC address</dt>
+                <dd>
+                  <code>{{ d.mac_address }}</code>
+                  @if (d.locally_administered_mac) {
+                    <span
+                      class="pill"
+                      title="Not assigned by a manufacturer: usually MAC randomization, but also used by virtual interfaces"
+                      >private MAC</span
+                    >
+                  }
+                </dd>
+                <dt>Type</dt>
+                <dd>
+                  {{ typeLabels[d.device_type] }}
+                  <span class="pill">{{
+                    d.type_source === 'manual' ? 'set by you' : d.inferred.confidence + ' % sure'
+                  }}</span>
+                </dd>
+                <dt>Manufacturer</dt>
+                <dd>
+                  {{
+                    d.vendor ?? (d.locally_administered_mac ? 'Unknown (private MAC)' : 'Unknown')
+                  }}
+                </dd>
+                <dt>First seen</dt>
+                <dd [title]="d.first_seen">{{ d.first_seen | timeAgo }}</dd>
+                <dt>Last seen</dt>
+                <dd [title]="d.last_seen">{{ d.last_seen | timeAgo }}</dd>
+              </dl>
+
+              <h2>Why this type?</h2>
+              <app-type-evidence [device]="d" />
+
+              <h2>Addresses</h2>
+              <app-address-table [addresses]="d.addresses" />
+
+              <h2>Discovered names</h2>
+              <app-name-sources [device]="d" />
+
+              <h2>History</h2>
+              <p>
+                <a routerLink="/events" [queryParams]="{ device: d.id }">Events for this device</a>
+              </p>
+            </div>
           </div>
-        </div>
+        }
       }
     </section>
   `,
@@ -316,6 +349,8 @@ export class DeviceDetail {
   readonly id = input.required<string>();
 
   protected readonly futureTabs = FUTURE_TABS;
+  protected readonly tabs = TABS;
+  protected readonly tab = signal<Tab>('overview');
   protected readonly trustLevels = TRUST_LEVELS;
   protected readonly deviceTypes = DEVICE_TYPES;
   protected readonly typeLabels = DEVICE_TYPE_LABELS;
