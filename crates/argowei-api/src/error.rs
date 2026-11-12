@@ -30,6 +30,9 @@ pub enum ApiError {
     BadRequest(String),
     /// The request clashes with the current state (409), e.g. a duplicate name.
     Conflict(&'static str),
+    /// Well-formed, but cannot be carried out (422), e.g. a scan target
+    /// outside the local network; the message says why.
+    Unprocessable(String),
     /// Throttled; the client may retry after the given number of seconds (429).
     TooManyRequests { retry_after_secs: u64 },
     /// A dependency (the database) failed; details are only logged (503).
@@ -51,6 +54,7 @@ impl ApiError {
             ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, (*msg).to_owned()),
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             ApiError::Conflict(msg) => (StatusCode::CONFLICT, (*msg).to_owned()),
+            ApiError::Unprocessable(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg.clone()),
             ApiError::TooManyRequests { .. } => {
                 (StatusCode::TOO_MANY_REQUESTS, "too many attempts".into())
             }

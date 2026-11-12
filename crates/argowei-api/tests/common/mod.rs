@@ -29,8 +29,13 @@ pub struct Harness {
 }
 
 pub async fn harness(pool: PgPool) -> Harness {
+    harness_with_scans(pool, argowei_api::scans::ScanConfig::default()).await
+}
+
+/// A harness whose port scans run with `config` (e.g. a stand-in for nmap).
+pub async fn harness_with_scans(pool: PgPool, config: argowei_api::scans::ScanConfig) -> Harness {
     let auth = AuthState::new(false, chrono::Duration::hours(1));
-    let state = AppState::new(pool.clone(), auth);
+    let state = AppState::new(pool.clone(), auth).with_scan_config(config);
     let setup_token = state
         .auth
         .init_setup_token(&state.db)

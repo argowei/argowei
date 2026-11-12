@@ -307,6 +307,43 @@ only if they are on the local network; a public resolver is used only if you set
 it explicitly. Names come from the network and any device can claim any name:
 treat them as labels, not identity. IPv6 is not covered yet.
 
+## Port scans
+
+A device's **Scans** tab starts an nmap scan of its current IPv4 address and
+shows the result. Three profiles are defined in code; the client only picks one:
+
+| Profile | Ports | Extra | Time limit |
+|---|---|---|---|
+| `quick` | 100 most common TCP ports | | 2 min |
+| `service` | 1000 most common TCP ports | service and version detection (`-sV --version-light`) | 10 min |
+| `full` | all 65535 TCP ports | | 30 min |
+
+nmap runs **unprivileged** (`--unprivileged -sT`, TCP connect scans): it needs no
+capabilities, and OS detection, which needs raw packets, is not offered. It is
+started without a shell, with a fixed argument vector and an empty environment
+apart from `PATH`. Only private and link-local addresses are scanned (RFC 1918,
+169.254/16, fc00::/7, fe80::/10); `ARGOWEI_SCAN_ALLOWED_RANGES` can narrow that
+further. Anything else is refused with `422`, as is a device without a known
+IPv4 address. One scan per device can be active at a time (`409` otherwise);
+`ARGOWEI_SCAN_CONCURRENCY` scans run at once and the rest wait in the queue.
+A scan that exceeds its time limit (or `ARGOWEI_SCAN_MAX_SECS`) is killed and
+stored as `timed_out`; a cancelled one is killed at once. Scans cut off by a
+restart are marked `failed` at the next start.
+
+```bash
+curl -X POST http://localhost:8000/api/devices/7/scans -b cookies.txt \
+     -H 'Content-Type: application/json' -d '{"profile":"quick"}'   # 202 + the queued scan
+curl http://localhost:8000/api/scans/1 -b cookies.txt                 # status, ports
+curl http://localhost:8000/api/devices/7/scans -b cookies.txt         # history, newest first
+curl -X POST http://localhost:8000/api/scans/1/cancel -b cookies.txt
+```
+
+Results are evidence, not proof: firewalls, rate limiting and sleeping devices
+hide ports. nmap's own XML is kept with each scan (`scans.raw_xml`). Starting and
+cancelling are audit-logged; outcomes appear on the timeline as `scan.completed`
+and `scan.failed`. For a local run, install nmap (`ARGOWEI_NMAP_PATH` if it is
+not on `PATH`); the API container image includes it.
+
 ## Event timeline
 
 What Argowei observed (devices discovered, online, offline, named) is recorded

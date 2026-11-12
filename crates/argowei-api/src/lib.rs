@@ -21,5 +21,6 @@ pub mod groups;
 pub mod names;
 pub mod presence;
 pub mod routes;
+pub mod scans;
 pub mod state;
 pub mod validate;

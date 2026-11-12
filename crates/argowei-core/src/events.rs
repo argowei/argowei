@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::names::NameSource;
+use crate::scan_profile::ScanProfile;
 
 /// How much attention an event deserves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -54,14 +55,20 @@ pub enum EventKind {
     DeviceOffline,
     #[serde(rename = "device.named")]
     DeviceNamed,
+    #[serde(rename = "scan.completed")]
+    ScanCompleted,
+    #[serde(rename = "scan.failed")]
+    ScanFailed,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 4] = [
+    pub const ALL: [EventKind; 6] = [
         Self::DeviceDiscovered,
         Self::DeviceOnline,
         Self::DeviceOffline,
         Self::DeviceNamed,
+        Self::ScanCompleted,
+        Self::ScanFailed,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -70,6 +77,8 @@ impl EventKind {
             Self::DeviceOnline => "device.online",
             Self::DeviceOffline => "device.offline",
             Self::DeviceNamed => "device.named",
+            Self::ScanCompleted => "scan.completed",
+            Self::ScanFailed => "scan.failed",
         }
     }
 
@@ -83,7 +92,9 @@ impl EventKind {
             Self::DeviceDiscovered
             | Self::DeviceOnline
             | Self::DeviceOffline
-            | Self::DeviceNamed => 1,
+            | Self::DeviceNamed
+            | Self::ScanCompleted
+            | Self::ScanFailed => 1,
         }
     }
 
@@ -93,7 +104,9 @@ impl EventKind {
             Self::DeviceDiscovered
             | Self::DeviceOnline
             | Self::DeviceOffline
-            | Self::DeviceNamed => Severity::Info,
+            | Self::DeviceNamed
+            | Self::ScanCompleted
+            | Self::ScanFailed => Severity::Info,
         }
     }
 }
@@ -107,6 +120,8 @@ pub enum Event {
     DeviceOnline(DeviceOnline),
     DeviceOffline(DeviceOffline),
     DeviceNamed(DeviceNamed),
+    ScanCompleted(ScanCompleted),
+    ScanFailed(ScanFailed),
 }
 
 impl Event {
@@ -116,6 +131,8 @@ impl Event {
             Self::DeviceOnline(_) => EventKind::DeviceOnline,
             Self::DeviceOffline(_) => EventKind::DeviceOffline,
             Self::DeviceNamed(_) => EventKind::DeviceNamed,
+            Self::ScanCompleted(_) => EventKind::ScanCompleted,
+            Self::ScanFailed(_) => EventKind::ScanFailed,
         }
     }
 }
@@ -182,6 +199,32 @@ pub struct DeviceNamed {
 pub struct NameAnswer {
     pub source: NameSource,
     pub name: String,
+}
+
+/// `scan.completed` (v1): a port scan finished and its results are stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScanCompleted {
+    /// `scans.id`; the full result is at `GET /api/scans/{scan_id}`.
+    pub scan_id: i64,
+    pub profile: ScanProfile,
+    /// The address that was scanned.
+    pub target: String,
+    /// Open TCP ports found, ascending.
+    pub open_ports: Vec<u16>,
+    /// Wall-clock run time of nmap in seconds.
+    pub duration_secs: f64,
+}
+
+/// `scan.failed` (v1): a port scan ended without a result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScanFailed {
+    pub scan_id: i64,
+    pub profile: ScanProfile,
+    pub target: String,
+    /// `failed`, `timed_out` or `cancelled`.
+    pub outcome: String,
+    /// What went wrong, in words.
+    pub error: String,
 }
 
 #[cfg(test)]
@@ -305,6 +348,20 @@ mod tests {
                 to: String::new(),
                 source: NameSource::Dhcp,
                 answers: Vec::new(),
+            }),
+            Event::ScanCompleted(ScanCompleted {
+                scan_id: 0,
+                profile: ScanProfile::Quick,
+                target: String::new(),
+                open_ports: Vec::new(),
+                duration_secs: 0.0,
+            }),
+            Event::ScanFailed(ScanFailed {
+                scan_id: 0,
+                profile: ScanProfile::Quick,
+                target: String::new(),
+                outcome: String::new(),
+                error: String::new(),
             }),
         ]
         .iter()

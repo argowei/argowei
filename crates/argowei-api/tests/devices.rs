@@ -28,6 +28,10 @@ fn test_state() -> AppState {
         offline_after_missed_scans: 3,
         offline_after_secs: 900,
         baseline_window_secs: 0,
+        nmap_path: "nmap".to_string(),
+        scan_concurrency: 2,
+        scan_targets: Default::default(),
+        scan_max_secs: 0,
     })
 }
 

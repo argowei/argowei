@@ -261,7 +261,9 @@ async fn the_event_types_are_listed_with_version_and_severity(pool: PgPool) {
             "device.discovered",
             "device.online",
             "device.offline",
-            "device.named"
+            "device.named",
+            "scan.completed",
+            "scan.failed"
         ]
     );
     assert_eq!(reply.body[0]["schema_version"], 1);

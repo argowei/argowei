@@ -11,5 +11,7 @@ pub mod events;
 pub mod names;
 pub mod network_interface;
 pub mod oui;
+pub mod scan_profile;
+pub mod scan_target;
 
 pub const PROJECT_NAME: &str = "Argowei";
