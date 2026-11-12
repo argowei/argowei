@@ -46,6 +46,11 @@ async fn main() {
         DiscoveryConfig::from(&settings),
         NamePipeline::from_settings(&settings),
     );
+    scans::scheduler::spawn(
+        state.db.clone(),
+        state.scans.clone(),
+        state.schedule_changed.clone(),
+    );
     let app = routes::router(state).into_make_service_with_connect_info::<SocketAddr>();
 
     let addr = settings.bind_address;

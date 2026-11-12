@@ -17,12 +17,15 @@
 //! [`runner`]; results may be incomplete (firewalls, rate limiting).
 
 pub mod runner;
+pub mod scheduler;
+pub mod schedules;
 pub mod store;
 
 use std::net::IpAddr;
 
 use argowei_core::scan_diff::{self, ScanDiff};
 use argowei_core::scan_profile::ScanProfile;
+use argowei_core::scan_target::ScanTargets;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -30,6 +33,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::PgPool;
 
 use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
@@ -44,6 +48,7 @@ const HISTORY_LIMIT: i64 = 50;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(schedules::router())
         .route("/api/devices/:id/scans", post(start).get(history))
         .route("/api/scans/:id", get(show))
         .route("/api/scans/:id/cancel", post(cancel))
@@ -69,10 +74,14 @@ fn parse_profile(value: &str) -> Result<ScanProfile, ApiError> {
 
 /// The address a scan of the device should target: its most recently seen
 /// IPv4 address, if it may be scanned at all.
-async fn scan_target(state: &AppState, device_id: i32) -> Result<IpAddr, ApiError> {
+async fn scan_target(
+    db: &PgPool,
+    targets: &ScanTargets,
+    device_id: i32,
+) -> Result<IpAddr, ApiError> {
     let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM devices WHERE id = $1)")
         .bind(device_id)
-        .fetch_one(&state.db)
+        .fetch_one(db)
         .await?;
     if !exists {
         return Err(ApiError::NotFound("no such device"));
@@ -83,7 +92,7 @@ async fn scan_target(state: &AppState, device_id: i32) -> Result<IpAddr, ApiErro
          WHERE device_id = $1 AND protocol = 'ipv4' ORDER BY last_seen DESC LIMIT 1",
     )
     .bind(device_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(db)
     .await?;
     let address = address.ok_or_else(|| {
         ApiError::Unprocessable("the device has no known IPv4 address to scan".into())
@@ -93,32 +102,42 @@ async fn scan_target(state: &AppState, device_id: i32) -> Result<IpAddr, ApiErro
             "the stored address \"{address}\" is not an IP address"
         ))
     })?;
-    state
-        .scans
-        .targets()
+    targets
         .check(ip)
         .map_err(|rejected| ApiError::Unprocessable(rejected.to_string()))?;
     Ok(ip)
 }
 
-async fn start(
-    State(state): State<AppState>,
-    Extension(user): Extension<AuthUser>,
-    meta: RequestMeta,
-    Path(device_id): Path<i32>,
-    Json(body): Json<StartScan>,
-) -> Result<Response, ApiError> {
-    let profile = parse_profile(&body.profile)?;
-    let target = scan_target(&state, device_id).await?;
+/// Who asked for a scan, for `scans.requested_by` and the audit log.
+pub struct Requester<'a> {
+    /// A user name, or [`audit::SYSTEM`] for scheduled scans.
+    pub actor: &'a str,
+    pub remote_addr: Option<String>,
+    /// The schedule that queued the scan, if any.
+    pub schedule_id: Option<i32>,
+}
+
+/// Queues a scan of a device and hands it to the runner: the one way scans
+/// start, whether a user or a schedule asks. Checks the target (404, 422),
+/// enforces one active scan per device (409) and audits the start.
+pub async fn enqueue(
+    db: &PgPool,
+    runner: &ScanRunner,
+    device_id: i32,
+    profile: ScanProfile,
+    requester: Requester<'_>,
+) -> Result<Scan, ApiError> {
+    let target = scan_target(db, runner.targets(), device_id).await?;
     let target_text = target.to_string();
 
-    let mut tx = state.db.begin().await?;
+    let mut tx = db.begin().await?;
     let scan_id = match store::insert_queued(
         &mut *tx,
         device_id,
         &target_text,
         profile,
-        &user.username,
+        requester.actor,
+        requester.schedule_id,
     )
     .await
     {
@@ -134,10 +153,15 @@ async fn start(
     };
     audit::record(
         &mut *tx,
-        AuditEntry::new(&user.username, "scan.start", Outcome::Success)
-            .target("device", device_id.to_string())
-            .remote_addr(meta.remote_addr)
-            .payload(json!({ "scan_id": scan_id, "profile": profile, "target": target_text })),
+        AuditEntry::new(requester.actor, "scan.start", Outcome::Success)
+            .target("device", device_id)
+            .remote_addr(requester.remote_addr)
+            .payload(json!({
+                "scan_id": scan_id,
+                "profile": profile,
+                "target": target_text,
+                "schedule_id": requester.schedule_id,
+            })),
     )
     .await?;
     let scan = store::get(&mut *tx, scan_id)
@@ -145,8 +169,8 @@ async fn start(
         .ok_or(ApiError::Unavailable)?;
     tx.commit().await?;
 
-    state.scans.submit(
-        state.db.clone(),
+    runner.submit(
+        db.clone(),
         ScanJob {
             scan_id,
             device_id,
@@ -154,6 +178,29 @@ async fn start(
             profile,
         },
     );
+    Ok(scan)
+}
+
+async fn start(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    meta: RequestMeta,
+    Path(device_id): Path<i32>,
+    Json(body): Json<StartScan>,
+) -> Result<Response, ApiError> {
+    let profile = parse_profile(&body.profile)?;
+    let scan = enqueue(
+        &state.db,
+        &state.scans,
+        device_id,
+        profile,
+        Requester {
+            actor: &user.username,
+            remote_addr: meta.remote_addr,
+            schedule_id: None,
+        },
+    )
+    .await?;
     Ok(mark_audited(
         (StatusCode::ACCEPTED, Json(scan)).into_response(),
     ))

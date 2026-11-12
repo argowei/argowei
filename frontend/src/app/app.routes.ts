@@ -25,6 +25,11 @@ export const routes: Routes = [
     loadComponent: () => import('./features/events/event-timeline').then((m) => m.EventTimeline),
   },
   {
+    path: 'schedules',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/schedules/schedule-list').then((m) => m.ScheduleList),
+  },
+  {
     path: 'login',
     canActivate: [loginGuard],
     loadComponent: () => import('./features/login/login').then((m) => m.Login),

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 chrono.workspace = true
+croner.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

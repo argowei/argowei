@@ -60,6 +60,8 @@ services:
       ARGOWEI_SCAN_CONCURRENCY: ${ARGOWEI_SCAN_CONCURRENCY:-2}
       ARGOWEI_SCAN_ALLOWED_RANGES: ${ARGOWEI_SCAN_ALLOWED_RANGES:-}
       ARGOWEI_SCAN_MAX_SECS: ${ARGOWEI_SCAN_MAX_SECS:-0}
+      # Scan schedules run in this time zone, e.g. Europe/Berlin.
+      TZ: ${TZ:-UTC}
     depends_on:
       db:
         condition: service_healthy

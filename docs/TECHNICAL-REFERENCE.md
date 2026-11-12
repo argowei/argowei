@@ -357,6 +357,40 @@ cancelling are audit-logged; outcomes appear on the timeline as `scan.completed`
 and `scan.failed`. For a local run, install nmap (`ARGOWEI_NMAP_PATH` if it is
 not on `PATH`); the API container image includes it.
 
+## Scheduled scans
+
+The **Schedules** page (`/api/scan-schedules`) runs port scans regularly: a
+cron expression (`minute hour day month weekday`, e.g. `0 3 * * *`), a profile,
+and a target: one device, every device of a group (as it is at run time), or
+all devices. Expressions are evaluated in the server's time zone (`TZ`, e.g.
+`Europe/Berlin`; the API image includes the time zone data). A schedule may run
+at most every 15 minutes; anything more frequent, invalid or never matching is
+refused with `422`, and the form previews the next runs.
+
+- **Restarts:** schedules and their next run are stored. A run that was due
+  while the server was down or asleep (more than two minutes late) is skipped,
+  not replayed: no burst of scans after downtime.
+- **No overlap:** a run is skipped while the schedule's previous scans are
+  still queued or running.
+- **Spread out:** each run starts after a random delay of up to a tenth of its
+  interval (at most a minute), and all scans share the global
+  `ARGOWEI_SCAN_CONCURRENCY` limit with scans started by hand.
+- **Same rules as manual scans:** every device goes through the same address
+  check and one-scan-per-device rule; devices without a scannable address are
+  left out.
+- **Audit:** creating, editing and deleting a schedule is logged with the user;
+  the scans a schedule starts are logged with the actor `system`, and each scan
+  records its `schedule_id`.
+
+```bash
+curl -X POST http://localhost:8000/api/scan-schedules -b cookies.txt \
+     -H 'Content-Type: application/json' \
+     -d '{"name":"Nightly","cron":"0 3 * * *","profile":"quick","target":{"kind":"group","id":2}}'
+curl -X PATCH http://localhost:8000/api/scan-schedules/1 -b cookies.txt \
+     -H 'Content-Type: application/json' -d '{"enabled":false}'
+curl 'http://localhost:8000/api/scan-schedules/preview?cron=0%203%20*%20*%20*' -b cookies.txt
+```
+
 ## Event timeline
 
 What Argowei observed (devices discovered, online, offline, named) is recorded

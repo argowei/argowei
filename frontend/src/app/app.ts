@@ -37,6 +37,7 @@ interface HealthResponse {
             }
           </a>
           <a routerLink="/events" routerLinkActive="active">Timeline</a>
+          <a routerLink="/schedules" routerLinkActive="active">Schedules</a>
         </nav>
         <span class="spacer"></span>
         <span
