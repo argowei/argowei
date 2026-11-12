@@ -39,7 +39,8 @@ use crate::error::ApiError;
 /// notification never delays a run for long.
 const MAX_SLEEP: Duration = Duration::from_secs(30);
 
-/// A run the scheduler has claimed and will start.
+/// A run the scheduler has claimed; it may still be skipped if the schedule
+/// is disabled or a previous run overlaps.
 #[derive(Debug, Clone)]
 pub struct DueRun {
     pub schedule_id: i32,
@@ -96,15 +97,12 @@ pub async fn claim_due(db: &PgPool, now: DateTime<Local>) -> sqlx::Result<Claime
 
         // Conditional on the value read: whoever moves it first owns the run.
         let won = sqlx::query(
-            "UPDATE scan_schedules \
-             SET next_run_at = $3, last_run_at = CASE WHEN $4 THEN last_run_at ELSE $5 END \
+            "UPDATE scan_schedules SET next_run_at = $3 \
              WHERE id = $1 AND enabled AND next_run_at = $2",
         )
         .bind(schedule.id)
         .bind(due_at)
         .bind(next.with_timezone(&Utc))
-        .bind(missed)
-        .bind(now.with_timezone(&Utc))
         .execute(db)
         .await?
         .rows_affected()
@@ -134,6 +132,8 @@ pub struct RunOutcome {
     pub queued: Vec<i64>,
     /// The previous run's scans were still going: nothing was queued.
     pub skipped_overlap: bool,
+    /// The schedule was disabled or deleted after this run was claimed.
+    pub skipped_inactive: bool,
     /// Devices left out: no scannable address, or already being scanned.
     pub refused: usize,
 }
@@ -145,12 +145,33 @@ pub async fn execute_run(
     runner: &ScanRunner,
     run: &DueRun,
 ) -> Result<RunOutcome, ApiError> {
+    // Keep the schedule locked until its scans have been queued. This makes
+    // disabling or deleting it atomic with respect to the start of a run:
+    // once an edit completes, no previously claimed run can still start.
+    // NO KEY UPDATE permits the scan inserts' foreign-key KEY SHARE locks.
+    let mut tx = db.begin().await?;
+    let active: Option<bool> =
+        sqlx::query_scalar("SELECT enabled FROM scan_schedules WHERE id = $1 FOR NO KEY UPDATE")
+            .bind(run.schedule_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if active != Some(true) {
+        tracing::info!(
+            schedule_id = run.schedule_id,
+            "claimed schedule is no longer active; skipping"
+        );
+        return Ok(RunOutcome {
+            skipped_inactive: true,
+            ..RunOutcome::default()
+        });
+    }
+
     let busy: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM scans \
                         WHERE schedule_id = $1 AND status IN ('queued', 'running'))",
     )
     .bind(run.schedule_id)
-    .fetch_one(db)
+    .fetch_one(&mut *tx)
     .await?;
     if busy {
         tracing::info!(
@@ -200,6 +221,13 @@ pub async fn execute_run(
             Err(error) => return Err(error),
         }
     }
+    if !outcome.queued.is_empty() {
+        sqlx::query("UPDATE scan_schedules SET last_run_at = now() WHERE id = $1")
+            .bind(run.schedule_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
     tracing::info!(
         schedule_id = run.schedule_id,
         queued = outcome.queued.len(),

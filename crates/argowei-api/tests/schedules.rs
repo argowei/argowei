@@ -311,8 +311,8 @@ async fn a_due_run_is_claimed_once_and_a_missed_one_is_skipped(pool: PgPool) {
     assert_eq!(claimed.runs[0].target, ScheduleTarget::All);
     assert_eq!(claimed.skipped_missed, [b]);
 
-    // Both moved to their next future occurrence; the missed run is not
-    // counted as run, and nothing else changed.
+    // Both moved to their next future occurrence. Claiming alone does not
+    // count as a run: the scan may still be skipped or fail to queue.
     assert!(next_run(&h, a).await.unwrap() > Utc::now());
     assert!(next_run(&h, b).await.unwrap() > Utc::now());
     assert_eq!(next_run(&h, c).await, later);
@@ -321,7 +321,7 @@ async fn a_due_run_is_claimed_once_and_a_missed_one_is_skipped(pool: PgPool) {
             .fetch_all(&h.pool)
             .await
             .unwrap();
-    assert!(last_runs[0].1.is_some(), "Due ran");
+    assert!(last_runs[0].1.is_none(), "Due was only claimed");
     assert!(last_runs[1].1.is_none(), "Missed did not");
 
     // Claiming again at the same moment finds nothing: no double runs.
@@ -383,6 +383,13 @@ async fn a_run_queues_its_targets_as_system_and_never_overlaps(pool: PgPool) {
     assert_eq!(first.queued.len(), 1, "only the group's scannable device");
     assert_eq!(first.refused, 1, "the public address is refused");
     assert!(!first.skipped_overlap);
+    let first_run_at: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_run_at FROM scan_schedules WHERE id = $1")
+            .bind(schedule)
+            .fetch_one(&h.pool)
+            .await
+            .unwrap();
+    assert!(first_run_at.is_some(), "a queued scan counts as a run");
 
     let (requested_by, schedule_id, target): (String, Option<i32>, String) =
         sqlx::query_as("SELECT requested_by, schedule_id, target_ip FROM scans")
@@ -404,9 +411,54 @@ async fn a_run_queues_its_targets_as_system_and_never_overlaps(pool: PgPool) {
     assert!(second.skipped_overlap);
     assert!(second.queued.is_empty());
     assert_eq!(count(&h.pool, "scans").await, 1);
+    let after_overlap: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_run_at FROM scan_schedules WHERE id = $1")
+            .bind(schedule)
+            .fetch_one(&h.pool)
+            .await
+            .unwrap();
+    assert_eq!(after_overlap, first_run_at, "overlap is not a run");
 
     sqlx::query("UPDATE scans SET status = 'cancelled', finished_at = now()")
         .execute(&h.pool)
         .await
         .unwrap();
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn disabling_a_claimed_schedule_prevents_its_scan(pool: PgPool) {
+    let nmap = SleepingNmap::new();
+    let runner = nmap.runner();
+    let (h, cookie) = admin(pool).await;
+    scan(&h, &[host(10, "aa:bb:cc:00:00:01")], t0()).await;
+    let schedule = create(&h, &cookie, nightly("Pending", json!({ "kind": "all" })))
+        .await
+        .body["id"]
+        .as_i64()
+        .unwrap() as i32;
+    due(&h, schedule, ChronoDuration::seconds(30)).await;
+    let claimed = claim_due(&h.pool, Local::now()).await.unwrap();
+    assert_eq!(claimed.runs.len(), 1);
+
+    let off = patch(
+        &h,
+        &cookie,
+        i64::from(schedule),
+        json!({ "enabled": false }),
+    )
+    .await;
+    assert_eq!(off.status, StatusCode::OK);
+    let outcome = execute_run(&h.pool, &runner, &claimed.runs[0])
+        .await
+        .unwrap();
+    assert!(outcome.skipped_inactive);
+    assert!(outcome.queued.is_empty());
+    assert_eq!(count(&h.pool, "scans").await, 0);
+    let last_run_at: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT last_run_at FROM scan_schedules WHERE id = $1")
+            .bind(schedule)
+            .fetch_one(&h.pool)
+            .await
+            .unwrap();
+    assert!(last_run_at.is_none());
 }
