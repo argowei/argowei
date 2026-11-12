@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::names::NameSource;
+use crate::scan_diff::ServiceInfo;
 use crate::scan_profile::ScanProfile;
 
 /// How much attention an event deserves.
@@ -59,16 +60,25 @@ pub enum EventKind {
     ScanCompleted,
     #[serde(rename = "scan.failed")]
     ScanFailed,
+    #[serde(rename = "port.opened")]
+    PortOpened,
+    #[serde(rename = "port.closed")]
+    PortClosed,
+    #[serde(rename = "service.changed")]
+    ServiceChanged,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 6] = [
+    pub const ALL: [EventKind; 9] = [
         Self::DeviceDiscovered,
         Self::DeviceOnline,
         Self::DeviceOffline,
         Self::DeviceNamed,
         Self::ScanCompleted,
         Self::ScanFailed,
+        Self::PortOpened,
+        Self::PortClosed,
+        Self::ServiceChanged,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -79,6 +89,9 @@ impl EventKind {
             Self::DeviceNamed => "device.named",
             Self::ScanCompleted => "scan.completed",
             Self::ScanFailed => "scan.failed",
+            Self::PortOpened => "port.opened",
+            Self::PortClosed => "port.closed",
+            Self::ServiceChanged => "service.changed",
         }
     }
 
@@ -94,7 +107,10 @@ impl EventKind {
             | Self::DeviceOffline
             | Self::DeviceNamed
             | Self::ScanCompleted
-            | Self::ScanFailed => 1,
+            | Self::ScanFailed
+            | Self::PortOpened
+            | Self::PortClosed
+            | Self::ServiceChanged => 1,
         }
     }
 
@@ -106,7 +122,11 @@ impl EventKind {
             | Self::DeviceOffline
             | Self::DeviceNamed
             | Self::ScanCompleted
-            | Self::ScanFailed => Severity::Info,
+            | Self::ScanFailed
+            | Self::PortClosed
+            | Self::ServiceChanged => Severity::Info,
+            // A newly reachable service is what a risk assessment looks at first.
+            Self::PortOpened => Severity::Warning,
         }
     }
 }
@@ -122,6 +142,9 @@ pub enum Event {
     DeviceNamed(DeviceNamed),
     ScanCompleted(ScanCompleted),
     ScanFailed(ScanFailed),
+    PortOpened(PortEvent),
+    PortClosed(PortEvent),
+    ServiceChanged(ServiceChanged),
 }
 
 impl Event {
@@ -133,6 +156,9 @@ impl Event {
             Self::DeviceNamed(_) => EventKind::DeviceNamed,
             Self::ScanCompleted(_) => EventKind::ScanCompleted,
             Self::ScanFailed(_) => EventKind::ScanFailed,
+            Self::PortOpened(_) => EventKind::PortOpened,
+            Self::PortClosed(_) => EventKind::PortClosed,
+            Self::ServiceChanged(_) => EventKind::ServiceChanged,
         }
     }
 }
@@ -227,6 +253,35 @@ pub struct ScanFailed {
     pub error: String,
 }
 
+/// `port.opened` / `port.closed` (v1): a scan found a port open that the
+/// previous comparable scan of the device did not (or the other way round).
+/// Only ports both scans looked at count.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PortEvent {
+    /// The scan that noticed the change.
+    pub scan_id: i64,
+    /// The scan it was compared with (same device and profile).
+    pub previous_scan_id: i64,
+    pub target: String,
+    pub protocol: String,
+    pub port: u16,
+    /// What runs on the port, from the scan that saw it open.
+    pub service: ServiceInfo,
+}
+
+/// `service.changed` (v1): a port stayed open but reports a different
+/// service, product or version than in the previous comparable scan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceChanged {
+    pub scan_id: i64,
+    pub previous_scan_id: i64,
+    pub target: String,
+    pub protocol: String,
+    pub port: u16,
+    pub before: ServiceInfo,
+    pub after: ServiceInfo,
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
@@ -317,6 +372,25 @@ mod tests {
         }
     }
 
+    fn no_service() -> ServiceInfo {
+        ServiceInfo {
+            service: None,
+            product: None,
+            version: None,
+        }
+    }
+
+    fn port_event() -> PortEvent {
+        PortEvent {
+            scan_id: 0,
+            previous_scan_id: 0,
+            target: String::new(),
+            protocol: String::new(),
+            port: 0,
+            service: no_service(),
+        }
+    }
+
     #[test]
     fn every_kind_has_an_event_variant() {
         // Adding a kind without a payload struct would leave it unrecordable.
@@ -362,6 +436,17 @@ mod tests {
                 target: String::new(),
                 outcome: String::new(),
                 error: String::new(),
+            }),
+            Event::PortOpened(port_event()),
+            Event::PortClosed(port_event()),
+            Event::ServiceChanged(ServiceChanged {
+                scan_id: 0,
+                previous_scan_id: 0,
+                target: String::new(),
+                protocol: String::new(),
+                port: 0,
+                before: no_service(),
+                after: no_service(),
             }),
         ]
         .iter()

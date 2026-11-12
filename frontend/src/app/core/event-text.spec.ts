@@ -75,10 +75,35 @@ describe('describeEvent', () => {
     );
   });
 
+  it('describes port changes found by comparing scans', () => {
+    const nginx = { service: 'http', product: 'nginx', version: '1.27' };
+    expect(describeEvent(event('port.opened', { port: 80, protocol: 'tcp', service: nginx }))).toBe(
+      'Port 80/tcp opened (http: nginx 1.27) since the previous scan.',
+    );
+    expect(
+      describeEvent(
+        event('port.closed', { port: 631, protocol: 'tcp', service: { service: 'ipp' } }),
+      ),
+    ).toBe('Port 631/tcp closed (ipp) since the previous scan.');
+    expect(
+      describeEvent(
+        event('service.changed', {
+          port: 22,
+          protocol: 'tcp',
+          before: { service: 'ssh', product: 'OpenSSH', version: '9.6' },
+          after: { service: 'ssh', product: 'OpenSSH', version: '9.7' },
+        }),
+      ),
+    ).toBe('Port 22/tcp changed from ssh: OpenSSH 9.6 to ssh: OpenSSH 9.7.');
+    expect(describeEvent(event('port.opened', {}))).toBe(
+      'A port opened (unknown service) since the previous scan.',
+    );
+  });
+
   it('shows unknown types by name', () => {
-    expect(describeEvent(event('port.opened', {}))).toBe('port.opened');
+    expect(describeEvent(event('dns.blocked', {}))).toBe('dns.blocked');
     expect(eventTypeLabel('device.named')).toBe('Named');
-    expect(eventTypeLabel('port.opened')).toBe('port.opened');
+    expect(eventTypeLabel('dns.blocked')).toBe('dns.blocked');
   });
 });
 

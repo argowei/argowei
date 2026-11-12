@@ -3,7 +3,7 @@ import { Injectable, InjectionToken, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { API_BASE } from './api';
-import { Scan, ScanProfile, ScanWithPorts } from './scan.models';
+import { Scan, ScanComparison, ScanProfile, ScanWithPorts } from './scan.models';
 
 /** How often a device's scans refresh while one is in progress, in ms. 0 turns polling off. */
 export const SCAN_POLL_MS = new InjectionToken<number>('SCAN_POLL_MS', {
@@ -25,6 +25,12 @@ export class ScansService {
 
   get(id: number): Observable<ScanWithPorts> {
     return this.http.get<ScanWithPorts>(`${API_BASE}/scans/${id}`);
+  }
+
+  /** Compares with `against`, or with the previous completed scan. */
+  diff(id: number, against: number | null = null): Observable<ScanComparison> {
+    const query = against === null ? '' : `?against=${against}`;
+    return this.http.get<ScanComparison>(`${API_BASE}/scans/${id}/diff${query}`);
   }
 
   cancel(id: number): Observable<Scan> {

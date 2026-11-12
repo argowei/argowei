@@ -18,6 +18,8 @@ fn a_recorded_port_scan_is_read() {
     assert!(run.args.unwrap().contains("--unprivileged"));
     assert!(run.elapsed_secs.unwrap() >= 0.0);
     assert_eq!(run.hosts.len(), 1);
+    assert!(run.coverage.contains("tcp", 18080) && run.coverage.contains("tcp", 18081));
+    assert!(!run.coverage.contains("tcp", 22), "only what nmap probed");
 
     let host = &run.hosts[0];
     assert_eq!(host.state, "up");

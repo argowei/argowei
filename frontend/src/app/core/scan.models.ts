@@ -56,3 +56,47 @@ export interface ScanPort {
 export interface ScanWithPorts extends Scan {
   ports: ScanPort[];
 }
+
+/** What runs on a port, as far as a scan could tell. */
+export interface ServiceInfo {
+  service: string | null;
+  product: string | null;
+  version: string | null;
+}
+
+export interface PortChange {
+  protocol: string;
+  port: number;
+  service: ServiceInfo;
+}
+
+export interface ServiceChange {
+  protocol: string;
+  port: number;
+  before: ServiceInfo;
+  after: ServiceInfo;
+}
+
+/** `GET /api/scans/{id}/diff`: changes from `older` to `newer`. */
+export interface ScanComparison {
+  older: Scan;
+  newer: Scan;
+  diff: {
+    opened: PortChange[];
+    closed: PortChange[];
+    changed: ServiceChange[];
+    unchanged: number;
+    /** Open in one scan, outside what the other one looked at. */
+    not_comparable: PortChange[];
+    profile_mismatch: boolean;
+    /** `[older, newer]` when the device was scanned at different addresses. */
+    address_changed: [string, string] | null;
+  };
+}
+
+/** "http: nginx 1.27", "ssh", or "unknown service". */
+export function describeService(info: ServiceInfo | null | undefined): string {
+  if (!info) return 'unknown service';
+  const software = [info.product, info.version].filter(Boolean).join(' ');
+  return [info.service, software].filter(Boolean).join(': ') || 'unknown service';
+}

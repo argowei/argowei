@@ -338,6 +338,19 @@ curl http://localhost:8000/api/devices/7/scans -b cookies.txt         # history,
 curl -X POST http://localhost:8000/api/scans/1/cancel -b cookies.txt
 ```
 
+**Comparing scans.** Each scan can be compared with another completed scan of
+the same device (`GET /api/scans/{id}/diff?against={other}`; without `against`,
+the previous completed scan): ports opened, ports closed, and services whose
+name, product or version changed. A comparison only counts ports *both* scans
+looked at; nmap reports exactly which ports it probed, so a port found by a full
+scan but outside an earlier quick scan's 100 ports is listed as *not comparable*
+instead of "opened", and a profile mismatch is flagged. Versions are only
+compared when both scans identified the software (`service` profile). After
+every completed scan, the API compares it with the previous completed scan of
+the same device and profile and records `port.opened` (severity `warning`),
+`port.closed` and `service.changed` events; the first scan of a device records
+none.
+
 Results are evidence, not proof: firewalls, rate limiting and sleeping devices
 hide ports. nmap's own XML is kept with each scan (`scans.raw_xml`). Starting and
 cancelling are audit-logged; outcomes appear on the timeline as `scan.completed`

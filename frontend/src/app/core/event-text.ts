@@ -1,5 +1,6 @@
 import { NAME_SOURCE_LABELS, NameSource } from './device.models';
 import { EVENT_TYPE_LABELS, KnownEventType, TimelineEvent } from './event.models';
+import { ServiceInfo, describeService } from './scan.models';
 
 /** The label for a type, falling back to the raw type for unknown ones. */
 export function eventTypeLabel(type: string): string {
@@ -64,9 +65,26 @@ export function describeEvent(event: TimelineEvent): string {
       const error = outcome === 'failed' && text('error') ? `: ${text('error')}` : '';
       return `${profileName(text('profile'))} scan of ${text('target') ?? 'the device'} ${how}${error}.`;
     }
+    case 'port.opened':
+    case 'port.closed': {
+      const port = portName(p);
+      const verb = event.type === 'port.opened' ? 'opened' : 'closed';
+      return `${port ? `Port ${port}` : 'A port'} ${verb} (${describeService(p['service'] as ServiceInfo)}) since the previous scan.`;
+    }
+    case 'service.changed': {
+      const port = portName(p);
+      return `${port ? `Port ${port}` : 'A port'} changed from ${describeService(p['before'] as ServiceInfo)} to ${describeService(p['after'] as ServiceInfo)}.`;
+    }
     default:
       return eventTypeLabel(event.type);
   }
+}
+
+/** "80/tcp" from a port event's payload, or null. */
+function portName(p: Record<string, unknown>): string | null {
+  return typeof p['port'] === 'number' && typeof p['protocol'] === 'string'
+    ? `${p['port']}/${p['protocol']}`
+    : null;
 }
 
 /** "Quick", "Service", "Full", or "Port" for an unknown profile. */

@@ -15,7 +15,10 @@ export type KnownEventType =
   | 'device.offline'
   | 'device.named'
   | 'scan.completed'
-  | 'scan.failed';
+  | 'scan.failed'
+  | 'port.opened'
+  | 'port.closed'
+  | 'service.changed';
 
 export const EVENT_TYPE_LABELS: Record<KnownEventType, string> = {
   'device.discovered': 'Discovered',
@@ -24,6 +27,9 @@ export const EVENT_TYPE_LABELS: Record<KnownEventType, string> = {
   'device.named': 'Named',
   'scan.completed': 'Scanned',
   'scan.failed': 'Scan failed',
+  'port.opened': 'Port opened',
+  'port.closed': 'Port closed',
+  'service.changed': 'Service changed',
 };
 
 export interface TimelineEvent {

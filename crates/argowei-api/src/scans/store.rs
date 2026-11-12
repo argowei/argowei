@@ -5,8 +5,9 @@
 //! while a scan runs) and exactly one of them wins; the loser's update
 //! simply matches no row.
 
-use argowei_collector::nmap::NmapRun;
-use argowei_core::events::{Event, ScanCompleted, ScanFailed};
+use argowei_collector::nmap::{self, NmapPort, NmapRun};
+use argowei_core::events::{Event, PortEvent, ScanCompleted, ScanFailed, ServiceChanged};
+use argowei_core::scan_diff::{self, PortCoverage, PortObservation, ScanSide};
 use argowei_core::scan_profile::ScanProfile;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -190,6 +191,8 @@ pub async fn store_result(
     open_ports.sort_unstable();
     open_ports.dedup();
 
+    record_changes(&mut tx, scan, run).await?;
+
     events::record(
         &mut *tx,
         Utc::now(),
@@ -205,6 +208,194 @@ pub async fn store_result(
     .await?;
     tx.commit().await?;
     Ok(true)
+}
+
+/// A completed scan as a side of a comparison: its ports from `scan_ports`
+/// and its coverage from the stored XML.
+pub struct Snapshot {
+    pub id: i64,
+    pub profile: ScanProfile,
+    pub target: String,
+    pub coverage: PortCoverage,
+    pub ports: Vec<PortObservation>,
+}
+
+impl Snapshot {
+    pub fn side(&self) -> ScanSide<'_> {
+        ScanSide {
+            profile: self.profile,
+            target: &self.target,
+            coverage: &self.coverage,
+            ports: &self.ports,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ObservationRow {
+    protocol: String,
+    port: i32,
+    state: String,
+    service: Option<String>,
+    product: Option<String>,
+    version: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct SnapshotRow {
+    id: i64,
+    profile: String,
+    target_ip: String,
+    raw_xml: Option<String>,
+}
+
+/// Loads a completed scan for comparison; `None` if it is not completed.
+pub async fn snapshot(
+    tx: &mut Transaction<'_, Postgres>,
+    scan_id: i64,
+) -> sqlx::Result<Option<Snapshot>> {
+    let row: Option<SnapshotRow> = sqlx::query_as(
+        "SELECT id, profile, target_ip, raw_xml FROM scans WHERE id = $1 AND status = 'completed'",
+    )
+    .bind(scan_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    let Some(profile) = ScanProfile::parse(&row.profile) else {
+        return Ok(None);
+    };
+    let ports: Vec<ObservationRow> = sqlx::query_as(
+        "SELECT protocol, port, state, service, product, version FROM scan_ports \
+         WHERE scan_id = $1",
+    )
+    .bind(scan_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(Some(Snapshot {
+        id: row.id,
+        profile,
+        target: row.target_ip,
+        // Without readable XML nothing is known to be covered: every port
+        // then counts as "not comparable" rather than opened or closed.
+        coverage: row
+            .raw_xml
+            .and_then(|xml| nmap::parse_xml(&xml).ok())
+            .map(|run| run.coverage)
+            .unwrap_or_default(),
+        ports: ports
+            .into_iter()
+            .filter_map(|row| {
+                Some(PortObservation {
+                    protocol: row.protocol,
+                    port: u16::try_from(row.port).ok()?,
+                    state: row.state,
+                    service: row.service,
+                    product: row.product,
+                    version: row.version,
+                })
+            })
+            .collect(),
+    }))
+}
+
+/// The newest completed scan of a device older than `before`, optionally
+/// of one profile only.
+pub async fn previous_completed(
+    tx: &mut Transaction<'_, Postgres>,
+    device_id: i32,
+    before: i64,
+    profile: Option<ScanProfile>,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar(
+        "SELECT id FROM scans          WHERE device_id = $1 AND id < $2 AND status = 'completed'            AND ($3::text IS NULL OR profile = $3)          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(device_id)
+    .bind(before)
+    .bind(profile.map(ScanProfile::as_str))
+    .fetch_optional(&mut **tx)
+    .await
+}
+
+fn observation(port: &NmapPort) -> PortObservation {
+    let service = port.service.as_ref();
+    PortObservation {
+        protocol: port.protocol.clone(),
+        port: port.port,
+        state: port.state.clone(),
+        service: service.and_then(|s| s.name.clone()),
+        product: service.and_then(|s| s.product.clone()),
+        version: service.and_then(|s| s.version.clone()),
+    }
+}
+
+/// Compares a just-completed scan with the previous completed scan of the
+/// same device *and profile* (so coverage matches) and records what changed
+/// as `port.opened`, `port.closed` and `service.changed` events. The first
+/// scan of a device has nothing to compare with and records nothing.
+async fn record_changes(
+    tx: &mut Transaction<'_, Postgres>,
+    scan: &Finished<'_>,
+    run: &NmapRun,
+) -> sqlx::Result<()> {
+    let Some(previous_id) =
+        previous_completed(tx, scan.device_id, scan.scan_id, Some(scan.profile)).await?
+    else {
+        return Ok(());
+    };
+    let Some(previous) = snapshot(tx, previous_id).await? else {
+        return Ok(());
+    };
+    let ports: Vec<PortObservation> = run
+        .hosts
+        .iter()
+        .flat_map(|host| &host.ports)
+        .map(observation)
+        .collect();
+    let current = ScanSide {
+        profile: scan.profile,
+        target: scan.target,
+        coverage: &run.coverage,
+        ports: &ports,
+    };
+    let changes = scan_diff::diff(&previous.side(), &current);
+
+    let now = Utc::now();
+    let port_event = |change: &scan_diff::PortChange| PortEvent {
+        scan_id: scan.scan_id,
+        previous_scan_id: previous.id,
+        target: scan.target.to_owned(),
+        protocol: change.protocol.clone(),
+        port: change.port,
+        service: change.service.clone(),
+    };
+    let mut events: Vec<Event> = Vec::new();
+    events.extend(
+        changes
+            .opened
+            .iter()
+            .map(|c| Event::PortOpened(port_event(c))),
+    );
+    events.extend(
+        changes
+            .closed
+            .iter()
+            .map(|c| Event::PortClosed(port_event(c))),
+    );
+    events.extend(changes.changed.iter().map(|c| {
+        Event::ServiceChanged(ServiceChanged {
+            scan_id: scan.scan_id,
+            previous_scan_id: previous.id,
+            target: scan.target.to_owned(),
+            protocol: c.protocol.clone(),
+            port: c.port,
+            before: c.before.clone(),
+            after: c.after.clone(),
+        })
+    }));
+    for event in &events {
+        events::record(&mut **tx, now, Some(scan.device_id), event).await?;
+    }
+    Ok(())
 }
 
 /// Ends a scan without a result and records `scan.failed`, if it is still

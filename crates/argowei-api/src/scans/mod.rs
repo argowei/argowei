@@ -8,6 +8,9 @@
 //! - `GET /api/scans/{id}` returns a scan with its ports.
 //! - `GET /api/devices/{id}/scans` lists a device's scans, newest first.
 //! - `POST /api/scans/{id}/cancel` stops a queued or running scan.
+//! - `GET /api/scans/{id}/diff?against={other}` compares two completed scans
+//!   of the same device (default: the previous completed one), see
+//!   [`argowei_core::scan_diff`].
 //!
 //! Starting and cancelling are audited; outcomes are recorded as
 //! `scan.completed` / `scan.failed` events. The work itself happens in
@@ -18,8 +21,9 @@ pub mod store;
 
 use std::net::IpAddr;
 
+use argowei_core::scan_diff::{self, ScanDiff};
 use argowei_core::scan_profile::ScanProfile;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -43,6 +47,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/devices/:id/scans", post(start).get(history))
         .route("/api/scans/:id", get(show))
         .route("/api/scans/:id/cancel", post(cancel))
+        .route("/api/scans/:id/diff", get(compare))
 }
 
 #[derive(Deserialize)]
@@ -172,6 +177,70 @@ async fn history(
     Ok(Json(
         store::for_device(&state.db, device_id, HISTORY_LIMIT).await?,
     ))
+}
+
+#[derive(Deserialize)]
+struct DiffQuery {
+    against: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct DiffResponse {
+    older: Scan,
+    newer: Scan,
+    diff: ScanDiff,
+}
+
+/// `GET /api/scans/{id}/diff`: what changed between two completed scans of
+/// one device. The older scan is always `older`, whichever way round the
+/// ids were given.
+async fn compare(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(query): Query<DiffQuery>,
+) -> Result<Json<DiffResponse>, ApiError> {
+    let mut tx = state.db.begin().await?;
+    let scan = store::get(&mut *tx, id)
+        .await?
+        .ok_or(ApiError::NotFound("no such scan"))?;
+    let other_id = match query.against {
+        Some(other) => other,
+        None => store::previous_completed(&mut tx, scan.device_id, id, None)
+            .await?
+            .ok_or_else(|| {
+                ApiError::Unprocessable(
+                    "there is no earlier completed scan of this device to compare with".into(),
+                )
+            })?,
+    };
+    let other = store::get(&mut *tx, other_id)
+        .await?
+        .ok_or(ApiError::NotFound("no such scan"))?;
+    if other.device_id != scan.device_id {
+        return Err(ApiError::Unprocessable(
+            "only scans of the same device can be compared".into(),
+        ));
+    }
+
+    let (older, newer) = if other.id < scan.id {
+        (other, scan)
+    } else {
+        (scan, other)
+    };
+    let not_completed = || ApiError::Unprocessable("only completed scans can be compared".into());
+    let before = store::snapshot(&mut tx, older.id)
+        .await?
+        .ok_or_else(not_completed)?;
+    let after = store::snapshot(&mut tx, newer.id)
+        .await?
+        .ok_or_else(not_completed)?;
+    tx.commit().await?;
+
+    Ok(Json(DiffResponse {
+        diff: scan_diff::diff(&before.side(), &after.side()),
+        older,
+        newer,
+    }))
 }
 
 async fn cancel(

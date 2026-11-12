@@ -94,6 +94,48 @@ describe('DeviceScans', () => {
     expect(el.querySelector('.result h2')?.textContent).toContain('192.168.1.20 (quick)');
   });
 
+  it('compares a completed scan with the previous one', async () => {
+    setup();
+    const newer = scan({ id: 2 });
+    const older = scan({ id: 1, profile: 'full' });
+    const { fixture, el } = await render([newer, older]);
+
+    const request = http.expectOne('/api/scans/2/diff?against=1');
+    request.flush({
+      older,
+      newer,
+      diff: {
+        opened: [
+          {
+            protocol: 'tcp',
+            port: 80,
+            service: { service: 'http', product: 'nginx', version: '1.27' },
+          },
+        ],
+        closed: [
+          { protocol: 'tcp', port: 631, service: { service: 'ipp', product: null, version: null } },
+        ],
+        changed: [],
+        unchanged: 1,
+        not_comparable: [
+          { protocol: 'tcp', port: 8443, service: { service: null, product: null, version: null } },
+        ],
+        profile_mismatch: true,
+        address_changed: null,
+      },
+    });
+    fixture.detectChanges();
+
+    const items = [...el.querySelectorAll('.changes li')].map((li) =>
+      li.textContent?.replace(/\s+/g, ' ').trim(),
+    );
+    expect(items).toEqual(['Opened 80/tcp — http: nginx 1.27', 'Closed 631/tcp — ipp']);
+    expect(el.querySelector('.banner.info')?.textContent).toContain('different profiles');
+    const text = el.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(text).toContain('Not comparable (only one scan looked): 8443/tcp');
+    expect(text).toContain('1 other open port(s) unchanged.');
+  });
+
   it('starts a scan with the chosen profile', async () => {
     setup();
     const { fixture, el } = await render([]);
@@ -154,6 +196,23 @@ describe('DeviceScans', () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     http.expectNone('/api/devices/7/scans'); // nothing in progress any more
+    fixture.destroy();
+  });
+
+  it('compares a scan with the previous one as soon as it finishes', async () => {
+    vi.useFakeTimers();
+    setup(1000);
+    const older = scan({ id: 1 });
+    const running = scan({ id: 2, status: 'running', open_ports: 0, finished_at: null });
+    const { fixture } = await render([running, older]);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    const done = scan({ id: 2 });
+    http.expectOne('/api/devices/7/scans').flush([done, older]);
+    http.expectOne('/api/scans/2').flush(withPorts(done));
+    fixture.detectChanges();
+
+    http.expectOne('/api/scans/2/diff?against=1');
     fixture.destroy();
   });
 
