@@ -18,12 +18,14 @@ import {
   SCAN_PROFILE_LABELS,
   SCAN_STATUS_LABELS,
   Scan,
+  ScanComparison,
   ScanProfile,
   ScanWithPorts,
   isActive,
 } from '../../core/scan.models';
 import { SCAN_POLL_MS, ScansService } from '../../core/scans.service';
 import { TimeAgoPipe } from '../../shared/time-ago.pipe';
+import { ScanDiff } from './scan-diff';
 import { ScanPorts } from './scan-ports';
 
 /**
@@ -33,7 +35,7 @@ import { ScanPorts } from './scan-ports';
  */
 @Component({
   selector: 'app-device-scans',
-  imports: [ScanPorts, TimeAgoPipe],
+  imports: [ScanPorts, ScanDiff, TimeAgoPipe],
   template: `
     <div class="card">
       <h2>Start a scan</h2>
@@ -135,6 +137,24 @@ import { ScanPorts } from './scan-ports';
         @switch (scan.status) {
           @case ('completed') {
             <app-scan-ports [ports]="scan.ports" />
+            @if (comparable().length) {
+              <h3>Changes</h3>
+              <label for="scan-against">Compare with</label>
+              <select id="scan-against" (change)="compareWith($event)">
+                @for (other of comparable(); track other.id) {
+                  <option [value]="other.id" [selected]="against() === other.id">
+                    {{ other.profile }} scan, {{ other.created_at | timeAgo }}
+                  </option>
+                }
+              </select>
+              @if (comparison(); as c) {
+                <app-scan-diff [comparison]="c" />
+              } @else if (compareError()) {
+                <p class="error" role="alert">{{ compareError() }}</p>
+              } @else {
+                <p class="muted" role="status">Comparing…</p>
+              }
+            }
           }
           @case ('queued') {
             <p role="status">Waiting for a free slot…</p>
@@ -160,6 +180,10 @@ import { ScanPorts } from './scan-ports';
       border-radius: 0.8rem;
       background: var(--bg-card);
       min-width: 0;
+    }
+    .card h3 {
+      margin: 1.2rem 0 0.4rem;
+      font-size: 0.95rem;
     }
     .card h2 {
       margin: 0 0 0.6rem;
@@ -248,6 +272,17 @@ export class DeviceScans {
   protected readonly selectedId = signal<number | null>(null);
   protected readonly selected = signal<ScanWithPorts | null>(null);
 
+  /** The scan the selected one is compared with; null until chosen. */
+  protected readonly against = signal<number | null>(null);
+  protected readonly comparison = signal<ScanComparison | null>(null);
+  protected readonly compareError = signal<string | null>(null);
+
+  /** Other completed scans the selected one can be compared with, newest first. */
+  protected readonly comparable = computed(() => {
+    const id = this.selectedId();
+    return this.scans().filter((s) => s.id !== id && s.status === 'completed');
+  });
+
   /** The scan in progress, if any; a device has at most one. */
   protected readonly active = computed(() => this.scans().find(isActive) ?? null);
 
@@ -331,12 +366,49 @@ export class DeviceScans {
   }
 
   protected select(id: number): void {
+    const changed = this.selectedId() !== id;
     this.selectedId.set(id);
+    if (changed) {
+      this.against.set(null);
+      this.comparison.set(null);
+      this.compareError.set(null);
+    }
     this.api.get(id).subscribe({
       next: (scan) => {
-        if (this.selectedId() === id) this.selected.set(scan);
+        if (this.selectedId() === id) this.show(scan, changed);
       },
       error: (error: unknown) => this.loadError.set(describeApiError(error)),
+    });
+  }
+
+  /**
+   * Shows the selected scan. Once it is completed, newly selected or just
+   * finished, it is compared with the scan before it by default.
+   */
+  private show(scan: ScanWithPorts, newlySelected: boolean): void {
+    const finishedNow = scan.status === 'completed' && this.selected()?.status !== 'completed';
+    this.selected.set(scan);
+    if (scan.status === 'completed' && (newlySelected || finishedNow)) {
+      const previous = this.comparable().find((s) => s.id < scan.id) ?? this.comparable()[0];
+      if (previous) this.compare(previous.id);
+    }
+  }
+
+  protected compareWith(event: Event): void {
+    this.compare(Number((event.target as HTMLSelectElement).value));
+  }
+
+  private compare(against: number): void {
+    const id = this.selectedId();
+    if (id === null) return;
+    this.against.set(against);
+    this.comparison.set(null);
+    this.compareError.set(null);
+    this.api.diff(id, against).subscribe({
+      next: (comparison) => {
+        if (this.selectedId() === id && this.against() === against) this.comparison.set(comparison);
+      },
+      error: (error: unknown) => this.compareError.set(describeApiError(error)),
     });
   }
 
@@ -351,7 +423,7 @@ export class DeviceScans {
       tap(({ scans, selected }) => {
         if (deviceId !== this.deviceId()) return;
         this.scans.set(scans);
-        if (selected && this.selectedId() === selected.id) this.selected.set(selected);
+        if (selected && this.selectedId() === selected.id) this.show(selected, false);
         this.loadError.set(null);
       }),
       map(() => undefined),

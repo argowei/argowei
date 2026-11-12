@@ -27,6 +27,9 @@ shape. Check `(type, schema_version)` before interpreting a payload.
 | `device.named` | 1 | info | The name shown for a device changed. |
 | `scan.completed` | 1 | info | A port scan finished; its result is stored. |
 | `scan.failed` | 1 | info | A port scan ended without a result (failed, timed out, cancelled). |
+| `port.opened` | 1 | warning | A port is open that the previous scan (same device and profile) saw closed. |
+| `port.closed` | 1 | info | A port the previous scan saw open is no longer open. |
+| `service.changed` | 1 | info | A port stayed open but reports another service, product or version. |
 
 ### `device.discovered` (v1)
 
@@ -85,6 +88,28 @@ shape. Check `(type, schema_version)` before interpreting a payload.
 | `target` | string | The address it was meant to scan. |
 | `outcome` | `failed` \| `timed_out` \| `cancelled` | How it ended. |
 | `error` | string | What went wrong, in words. |
+
+### `port.opened` and `port.closed` (v1)
+
+Only ports both scans looked at count; see "Comparing scans" in the technical
+reference.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `scan_id` | integer | The scan that noticed the change. |
+| `previous_scan_id` | integer | The scan it was compared with. |
+| `target` | string | The address that was scanned. |
+| `protocol` | string | `tcp` (or `udp`). |
+| `port` | integer | The port. |
+| `service` | `{service, product, version}` | What runs there, from the scan that saw it open; fields may be null. |
+
+### `service.changed` (v1)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `scan_id`, `previous_scan_id`, `target`, `protocol`, `port` | | As for `port.opened`. |
+| `before` | `{service, product, version}` | What the previous scan reported. |
+| `after` | `{service, product, version}` | What this scan reports. |
 
 ## Reading the timeline
 

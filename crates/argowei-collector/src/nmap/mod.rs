@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use argowei_core::scan_diff::PortCoverage;
 use roxmltree::{Document, Node, ParsingOptions};
 
 /// Upper bound on XML nodes; a full scan of one host stays far below it.
@@ -32,6 +33,9 @@ pub struct NmapRun {
     pub succeeded: bool,
     /// nmap's own error message, if it gave one.
     pub error: Option<String>,
+    /// The ports nmap probed (from `scaninfo`); empty if it did not say,
+    /// which makes every port count as not compared.
+    pub coverage: PortCoverage,
     pub hosts: Vec<NmapHost>,
 }
 
@@ -117,8 +121,23 @@ pub fn parse_xml(xml: &str) -> Result<NmapRun, NmapError> {
         .map(parse_host)
         .collect::<Result<Vec<_>, _>>()?;
 
+    // A malformed list only loses that protocol's coverage: ports outside
+    // the known coverage are reported as not comparable, never as changes.
+    let mut coverage = PortCoverage::default();
+    for info in root.children().filter(|n| n.has_tag_name("scaninfo")) {
+        if let (Some(protocol), Some(services)) =
+            (info.attribute("protocol"), info.attribute("services"))
+        {
+            let mut one = PortCoverage::default();
+            if one.add_services(protocol, services).is_some() {
+                coverage.add_services(protocol, services);
+            }
+        }
+    }
+
     Ok(NmapRun {
         version: attr(root, "version"),
+        coverage,
         args: attr(root, "args"),
         elapsed_secs: finished
             .and_then(|f| f.attribute("elapsed"))
