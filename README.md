@@ -10,17 +10,18 @@ Argowei is a self-hosted network inventory for homelabs and private infrastructu
 
 | Available today | Planned direction |
 | --- | --- |
-| ARP discovery, persistent device inventory, hostname lookup | Service and vulnerability analysis |
-| Presence history and new-device alerts | DNS and network intelligence |
-| Device labels, groups, trust levels, and audit log | Policy enforcement through controlled infrastructure |
+| ARP discovery, device inventory, naming, labels, groups, and trust levels | Vulnerability analysis (CVE matching, hardening checks) |
+| Nmap port scans with fixed profiles, scan diffing, and scheduled scans | DNS and network intelligence |
+| Presence history, new-device alerts, an event timeline, and audit log | Policy enforcement through controlled infrastructure |
 
 Argowei only observes the networks and interfaces you configure. ARP replies and hostnames are not proof of device identity, and a normal LAN host cannot see all traffic between other devices.
 
 The application has four Rust crates: `argowei-core` holds device and name
-models, `argowei-collector` sends ARP requests and resolves names,
-`argowei-api` persists scans and serves the authenticated HTTP API, and
-`argowei-cli` exposes interface discovery and manual scans. PostgreSQL stores
-the inventory and scan history; the Angular dashboard presents them.
+models, `argowei-collector` sends ARP requests, resolves names and runs nmap
+port scans, `argowei-api` persists scans and events and serves the authenticated
+HTTP API, and `argowei-cli` exposes interface discovery and manual scans.
+PostgreSQL stores the inventory, scan and event history; the Angular dashboard
+presents them.
 
 ## Preview
 
@@ -38,19 +39,10 @@ Discovery is disabled until you configure an interface. The [technical reference
 
 - [Deployment](docs/DEPLOYMENT.md) — installation and network setup
 - [Threat model](docs/THREAT-MODEL.md) — trust boundaries, controls and deployment limits
-- [Technical reference](docs/TECHNICAL-REFERENCE.md) — discovery, authentication, data model, and development checks
+- [Technical reference](docs/TECHNICAL-REFERENCE.md) — discovery, port scans, authentication, data model, and development checks
+- [Events](docs/EVENTS.md) — the timeline event types and their payloads
 - [Presence evaluation](docs/PRESENCE-EVALUATION.md) — synthetic checks, a [trace replay benchmark](docs/PRESENCE-REPLAY.md), and a [lab export protocol](docs/PRESENCE-LAB.md) for independently labeled observations
 
 ## Contributing
 
 Read the [contributing guide](https://github.com/argowei/.github/blob/main/CONTRIBUTING.md) or [open an issue](https://github.com/argowei/argowei/issues). The project is licensed under [MIT](LICENSE).
-
-## Development and attribution
-
-Argowei is a collaboration between Deniz Altunkapan and Silas. The commit
-history records the work in detail. Deniz introduced the Rust workspace,
-devices API, CLI interface listing, ARP discovery and its concurrency bounds,
-the device/address separation, and the reproducible presence evaluations.
-Silas developed the PostgreSQL-backed service, scheduled discovery,
-authentication and audit logging, naming and classification, and much of the
-dashboard.
