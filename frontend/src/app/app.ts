@@ -36,6 +36,7 @@ interface HealthResponse {
               <span class="visually-hidden">({{ openAlerts() }} open)</span>
             }
           </a>
+          <a routerLink="/events" routerLinkActive="active">Timeline</a>
         </nav>
         <span class="spacer"></span>
         <span

@@ -307,6 +307,14 @@ only if they are on the local network; a public resolver is used only if you set
 it explicitly. Names come from the network and any device can claim any name:
 treat them as labels, not identity. IPv6 is not covered yet.
 
+## Event timeline
+
+What Argowei observed (devices discovered, online, offline, named) is recorded
+as typed, versioned events and shown on the dashboard's **Timeline**, with
+filters by device, type, severity and time. Read them with `GET /api/events`
+(cursor pagination that stays complete while events are written). Types,
+payload schemas and the API are described in [EVENTS.md](EVENTS.md).
+
 ## Audit log
 
 Logins, logouts, setup and every other state-changing request are recorded in

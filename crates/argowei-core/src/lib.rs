@@ -7,6 +7,7 @@
 
 pub mod device;
 pub mod device_type;
+pub mod events;
 pub mod names;
 pub mod network_interface;
 pub mod oui;

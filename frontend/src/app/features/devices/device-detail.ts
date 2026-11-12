@@ -195,6 +195,11 @@ const FUTURE_TABS = ['Scans', 'DNS', 'CVEs', 'Policy'];
 
             <h2>Discovered names</h2>
             <app-name-sources [device]="d" />
+
+            <h2>History</h2>
+            <p>
+              <a routerLink="/events" [queryParams]="{ device: d.id }">Events for this device</a>
+            </p>
           </div>
         </div>
       }

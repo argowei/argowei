@@ -12,6 +12,7 @@ pub mod alerts;
 pub mod audit;
 pub mod auth;
 pub mod config;
+pub mod device_summary;
 pub mod devices;
 pub mod discovery;
 pub mod error;
