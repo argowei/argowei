@@ -21,6 +21,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::audit::{self, mark_audited, AuditEntry, Outcome, RequestMeta};
 use crate::auth::AuthUser;
+use crate::device_summary::DeviceSummary;
 use crate::error::ApiError;
 use crate::state::AppState;
 
@@ -217,14 +218,6 @@ struct AlertRow {
 }
 
 #[derive(Serialize)]
-struct DeviceSummary {
-    id: i32,
-    display_name: String,
-    mac_address: String,
-    vendor: Option<&'static str>,
-}
-
-#[derive(Serialize)]
 struct Alert {
     id: i64,
     r#type: String,
@@ -243,18 +236,12 @@ struct Alert {
 
 impl From<AlertRow> for Alert {
     fn from(row: AlertRow) -> Self {
-        let device = match (row.device_id, row.device_mac) {
-            (Some(id), Some(mac_address)) => Some(DeviceSummary {
-                id,
-                display_name: row
-                    .device_label
-                    .or(row.device_name)
-                    .unwrap_or_else(|| mac_address.clone()),
-                vendor: oui::lookup(&mac_address).vendor,
-                mac_address,
-            }),
-            _ => None,
-        };
+        let device = DeviceSummary::from_columns(
+            row.device_id,
+            row.device_mac,
+            row.device_label,
+            row.device_name,
+        );
 
         let mut payload = row.payload;
         if row.r#type == NEW_DEVICE {

@@ -17,13 +17,13 @@ use argowei_collector::names::{
     resolve_all, DhcpLeaseResolver, HostnameResolver, MdnsResolver, NameSource, NetbiosResolver,
     RdnsResolver, Target, TargetNames,
 };
+use argowei_core::events::{DeviceNamed, Event, NameAnswer};
 use argowei_core::names::{choose_name, sanitize_name};
 use chrono::{DateTime, Utc};
-use serde_json::json;
 use sqlx::PgPool;
 
 use crate::config::Settings;
-use crate::events::{self, Severity};
+use crate::events;
 
 /// A device without any name is looked up again after this fraction of the
 /// refresh interval; it may simply have been asleep.
@@ -308,14 +308,18 @@ async fn refresh_displayed_name(
         events::record(
             &mut **tx,
             now,
-            events::DEVICE_NAMED,
-            Severity::Info,
             Some(device_id),
-            json!({
-                "from": current_name,
-                "to": name,
-                "source": source,
-                "answers": known.iter().map(|(s, n)| json!({ "source": s, "name": n })).collect::<Vec<_>>(),
+            &Event::DeviceNamed(DeviceNamed {
+                from: current_name,
+                to: name.to_owned(),
+                source,
+                answers: known
+                    .iter()
+                    .map(|(source, name)| NameAnswer {
+                        source: *source,
+                        name: name.clone(),
+                    })
+                    .collect(),
             }),
         )
         .await?;

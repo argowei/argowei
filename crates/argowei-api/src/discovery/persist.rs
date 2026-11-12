@@ -2,16 +2,16 @@
 //! device types and new-device alerts, all in a single transaction.
 
 use chrono::{DateTime, Utc};
-use serde_json::json;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use argowei_core::device::AddressSource;
 use argowei_core::device_type::{classify, Signals};
+use argowei_core::events::{DeviceDiscovered, DeviceOffline, DeviceOnline, Event, OfflinePolicy};
 use argowei_core::oui;
 
 use super::{ObservedHost, ScanSummary};
 use crate::alerts;
-use crate::events::{self, Severity};
+use crate::events;
 use crate::presence::PresencePolicy;
 
 type Tx<'a> = Transaction<'a, Postgres>;
@@ -193,16 +193,14 @@ async fn record_device_event(
         events::record(
             &mut **tx,
             scan.seen_at,
-            events::DEVICE_DISCOVERED,
-            Severity::Info,
             Some(device.id),
-            // Whether the device was learned silently: analyses of how a
-            // network grew should be able to tell baseline from new.
-            json!({
-                "interface": scan.interface,
-                "scan_id": scan.id,
-                "ip": ip,
-                "baseline": scan.baseline,
+            &Event::DeviceDiscovered(DeviceDiscovered {
+                interface: scan.interface.to_owned(),
+                scan_id: scan.id,
+                ip: ip.to_owned(),
+                // Whether the device was learned silently: analyses of how a
+                // network grew should be able to tell baseline from new.
+                baseline: scan.baseline,
             }),
         )
         .await?;
@@ -226,14 +224,12 @@ async fn record_device_event(
         events::record(
             &mut **tx,
             scan.seen_at,
-            events::DEVICE_ONLINE,
-            Severity::Info,
             Some(device.id),
-            json!({
-                "interface": scan.interface,
-                "scan_id": scan.id,
-                "ip": ip,
-                "last_seen_before": offline_since,
+            &Event::DeviceOnline(DeviceOnline {
+                interface: scan.interface.to_owned(),
+                scan_id: scan.id,
+                ip: ip.to_owned(),
+                last_seen_before: offline_since,
             }),
         )
         .await?;
@@ -358,17 +354,15 @@ async fn mark_missing_devices_offline(
         events::record(
             &mut **tx,
             now,
-            events::DEVICE_OFFLINE,
-            Severity::Info,
             Some(device_id),
-            json!({
-                "interface": interface,
-                "last_seen": last_seen,
-                "missed_scans": missed_scans,
-                "silent_for_secs": now.signed_duration_since(last_seen).num_seconds(),
-                "policy": {
-                    "offline_after_missed_scans": policy.offline_after_missed_scans,
-                    "offline_after_secs": policy.offline_after.as_secs(),
+            &Event::DeviceOffline(DeviceOffline {
+                interface: interface.to_owned(),
+                last_seen,
+                missed_scans,
+                silent_for_secs: now.signed_duration_since(last_seen).num_seconds(),
+                policy: OfflinePolicy {
+                    offline_after_missed_scans: policy.offline_after_missed_scans,
+                    offline_after_secs: policy.offline_after.as_secs(),
                 },
             }),
         )
