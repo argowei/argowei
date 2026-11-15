@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
@@ -118,6 +118,7 @@ fn labels(window: &Window) -> Result<Vec<Label>, String> {
     let mut result = Vec::with_capacity(window.ground_truth.len());
     let mut previous = None;
     for item in &window.ground_truth {
+        exact_reference_time(item.at)?;
         let at_ms = offset(item.at, window.start, window.end)?;
         if previous.is_some_and(|at| at >= at_ms) {
             return Err(format!(
@@ -138,6 +139,13 @@ fn labels(window: &Window) -> Result<Vec<Label>, String> {
         ));
     }
     Ok(result)
+}
+
+fn exact_reference_time(at: DateTime<Utc>) -> Result<(), String> {
+    if at.nanosecond() >= 1_000_000_000 || !at.nanosecond().is_multiple_of(1_000_000) {
+        return Err("study boundaries and reference labels must use whole milliseconds without leap seconds; account for rounding in reference uncertainty".into());
+    }
+    Ok(())
 }
 
 async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
@@ -173,6 +181,8 @@ async fn export(pool: &PgPool, study: Study) -> Result<ReplayInput, String> {
     let mut traces = Vec::with_capacity(study.traces.len());
     let mut ids = std::collections::HashSet::new();
     for window in study.traces {
+        exact_reference_time(window.start)?;
+        exact_reference_time(window.end)?;
         if window.device_id.trim().is_empty()
             || window.interface.trim().is_empty()
             || window.mac_address.trim().is_empty()
@@ -644,6 +654,64 @@ mod tests {
         assert!(export_error(&db, study)
             .await
             .contains("outside its half-open trace window"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn rejects_lossy_reference_times(db: PgPool) {
+        let original = seed(&db).await;
+        for field in ["start", "end"] {
+            let mut study = original.clone();
+            let at = if field == "start" {
+                start()
+            } else {
+                start() + Duration::minutes(10)
+            };
+            study["traces"][0][field] =
+                serde_json::to_value(at + Duration::microseconds(1)).unwrap();
+            assert!(export_error(&db, study)
+                .await
+                .contains("whole milliseconds"));
+        }
+        let mut study = original.clone();
+        // This isolated label would previously truncate backwards to 239999 ms,
+        // silently shrinking an independently declared unknown interval.
+        study["traces"][0]["ground_truth"] = serde_json::json!([
+            { "at": start(), "state": "unknown" },
+            { "at": start() + Duration::minutes(4) - Duration::microseconds(1), "state": "online" }
+        ]);
+        assert!(export_error(&db, study)
+            .await
+            .contains("whole milliseconds"));
+        let mut study = original;
+        study["traces"][0]["ground_truth"][0]["at"] = serde_json::json!("2026-01-01T12:00:60Z");
+        assert!(export_error(&db, study)
+            .await
+            .contains("without leap seconds"));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn preserves_exact_reference_milliseconds_and_existing_observation_quantization(
+        db: PgPool,
+    ) {
+        let mut study = seed(&db).await;
+        study["traces"][0]["ground_truth"] = serde_json::json!([
+            { "at": start(), "state": "unknown" },
+            { "at": start() + Duration::milliseconds(240001), "state": "online" }
+        ]);
+        sqlx::query("INSERT INTO scan_attempts (interface, attempted_at, outcome, failure_kind) VALUES ('eth0', $1, 'failed', 'scanner')")
+            .bind(start() + Duration::microseconds(540001234))
+            .execute(&db).await.unwrap();
+        let output = export(&db, serde_json::from_value(study).unwrap())
+            .await
+            .unwrap();
+        let value = serde_json::to_value(&output).unwrap();
+        assert_eq!(value["traces"][0]["ground_truth"][1]["at_ms"], 240001);
+        assert_eq!(value["traces"][0]["observations"][4]["at_ms"], 540001);
+        let report = presence_replay::replay_json(&serde_json::to_vec(&output).unwrap()).unwrap();
+        let report = serde_json::to_value(report).unwrap();
+        for method in report["aggregate"].as_array().unwrap() {
+            assert_eq!(method["metrics"]["confusion"]["unlabeled_ms"], 240001);
+        }
     }
 
     #[sqlx::test(migrations = "../../migrations")]

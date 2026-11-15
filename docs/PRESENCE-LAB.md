@@ -40,6 +40,13 @@ Write a local `study.json` with the following shape. Times are UTC ISO 8601
 timestamps. The `end` boundary is exclusive. The MAC is used only for the
 local database lookup and is omitted from the generated replay file.
 The study file uses schema version 1; the exporter writes replay input version 2.
+Study boundaries and reference labels must use whole milliseconds without leap
+seconds. Finer precision is rejected so an uncertain reference interval is not
+silently shortened by truncation. Normalize independent logs conservatively
+and include rounding error in the reference converter's uncertainty bounds.
+Persisted observation timestamps retain their existing conversion to elapsed
+whole milliseconds (truncated toward the trace start); sub-millisecond probe
+timing is not represented by replay, and collisions are rejected.
 
 ```json
 {
