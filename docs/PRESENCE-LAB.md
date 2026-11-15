@@ -30,6 +30,12 @@ independent ground truth or establish field accuracy.
 
 ## Export
 
+For separately recorded reference events with clock and sensing uncertainty,
+use the offline [reference label converter](PRESENCE-REFERENCE.md) to generate
+conservative `unknown` windows before writing the study. Keep its provenance
+artifact alongside the original independent logs. Manually authored labels
+remain supported; their uncertainty and completeness still need justification.
+
 Write a local `study.json` with the following shape. Times are UTC ISO 8601
 timestamps. The `end` boundary is exclusive. The MAC is used only for the
 local database lookup and is omitted from the generated replay file.

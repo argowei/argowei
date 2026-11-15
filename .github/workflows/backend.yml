@@ -11,6 +11,7 @@ on:
       - "docs/evidence/presence-evaluation.json"
       - "docs/PRESENCE-REPLAY.md"
       - "docs/PRESENCE-LAB.md"
+      - "docs/PRESENCE-REFERENCE.md"
       - "docs/evidence/presence-replay*.json"
       - ".github/workflows/backend.yml"
   push:
@@ -25,6 +26,7 @@ on:
       - "docs/evidence/presence-evaluation.json"
       - "docs/PRESENCE-REPLAY.md"
       - "docs/PRESENCE-LAB.md"
+      - "docs/PRESENCE-REFERENCE.md"
       - "docs/evidence/presence-replay*.json"
       - ".github/workflows/backend.yml"
 
@@ -86,3 +88,6 @@ jobs:
 
       - name: Verify database-backed presence export
         run: cargo test --locked -p argowei-api --example presence_export
+
+      - name: Verify independent reference label conversion
+        run: cargo test --locked -p argowei-api --example presence_reference

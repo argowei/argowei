@@ -12,6 +12,10 @@ use sqlx::PgPool;
 #[path = "presence_replay/mod.rs"]
 mod presence_replay;
 
+#[cfg(test)]
+#[path = "presence_reference/mod.rs"]
+mod presence_reference;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Study {
@@ -437,6 +441,40 @@ mod tests {
         // The pseudonym travels; the real MAC never does.
         assert!(value.to_string().contains("device-1"));
         assert!(!value.to_string().contains(MAC));
+    }
+
+    #[sqlx::test(migrations = "../../migrations")]
+    async fn exports_converted_uncertainty_without_scoring_it_as_known(db: PgPool) {
+        let mut study = seed(&db).await;
+        // These reference events are constructed test data, not lab evidence.
+        let reference = serde_json::json!({
+            "schema_version": 1, "kind": "synthetic", "device_id": "device-1",
+            "start": start(), "end": start() + Duration::minutes(10),
+            "source": { "description": "Synthetic link transitions",
+                "raw_log_sha256": "0".repeat(64), "state_definition": "Test LAN membership",
+                "completeness": "All constructed changes included" },
+            "clock": { "offset_ms": 0, "uncertainty_ms": 1000, "evidence": "Synthetic clock bound" },
+            "events": [
+                { "id": "initial", "recorded_at": start() - Duration::seconds(10),
+                    "uncertainty_ms": 0, "state": "online" },
+                { "id": "disconnect", "recorded_at": start() + Duration::minutes(4),
+                    "uncertainty_ms": 1000, "state": "offline" }
+            ]
+        });
+        let artifact =
+            super::presence_reference::convert_json(&serde_json::to_vec(&reference).unwrap())
+                .unwrap();
+        study["traces"][0]["ground_truth"] =
+            serde_json::to_value(artifact).unwrap()["ground_truth"].clone();
+        let output = export(&db, serde_json::from_value(study).unwrap())
+            .await
+            .unwrap();
+        let report = presence_replay::replay_json(&serde_json::to_vec(&output).unwrap()).unwrap();
+        let value = serde_json::to_value(report).unwrap();
+        for method in value["aggregate"].as_array().unwrap() {
+            assert_eq!(method["metrics"]["confusion"]["unlabeled_ms"], 4000);
+            assert_eq!(method["detection"]["detected"], 0);
+        }
     }
 
     #[sqlx::test(migrations = "../../migrations")]
