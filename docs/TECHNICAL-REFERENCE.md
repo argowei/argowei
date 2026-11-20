@@ -81,6 +81,26 @@ A device is marked offline only after it missed `ARGOWEI_OFFLINE_AFTER_MISSED_SC
 Both are required so a scanning gap (API down) cannot mark everything offline
 after one miss. Failed scans are not scans and never count as misses.
 
+### Choosing the thresholds
+
+The defaults trade false offline reports against how long a real departure goes
+unnoticed, and the [threshold sweep](PRESENCE-SWEEP.md) measures both costs
+across the grid so the trade is visible rather than guessed. Three results are
+worth knowing before changing either value:
+
+- Against reporting offline on a single missed reply, the defaults cut false
+  offline reports about twelvefold, for roughly nine minutes of added delay.
+- At the modelled five-minute scan interval the time threshold never binds,
+  because three missed scans already span fifteen minutes. Shortening the scan
+  interval is what makes `ARGOWEI_OFFLINE_AFTER_SECS` start to matter.
+- Networks full of power-saving devices pay more: the same defaults produce
+  roughly 0.9 false offline reports per 1000 scans when devices miss 5% of
+  replies, and about 82 when they miss 45%. Raising
+  `ARGOWEI_OFFLINE_AFTER_MISSED_SCANS` is the lever for that case.
+
+Those figures come from a synthetic model, not from field measurement. Re-run
+the sweep with your own scan interval before relying on them.
+
 A failed scan is still visible: `GET /api/discovery/status` (authenticated)
 lists, per configured interface, the last attempt, last success and summary,
 the last error, and the number of consecutive failures. This API snapshot
