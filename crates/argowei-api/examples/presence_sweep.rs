@@ -77,7 +77,9 @@ struct Step {
 }
 
 /// One trace from the generative model described in the module documentation.
-fn generate_trace(rng: &mut StdRng) -> Vec<Step> {
+/// `sleep_miss_rate` is a parameter so the sensitivity check can vary the one
+/// assumption the conclusions are most exposed to.
+fn generate_trace(rng: &mut StdRng, sleep_miss_rate: f64) -> Vec<Step> {
     let mut steps = Vec::with_capacity(STEPS_PER_TRACE);
     // Start present, so every trace has a last-seen time before it can leave.
     let mut present = true;
@@ -86,7 +88,7 @@ fn generate_trace(rng: &mut StdRng) -> Vec<Step> {
         let completed = !rng.gen_bool(SCAN_FAILURE_RATE);
         // A present device replies unless its radio is asleep; an absent device
         // never replies. Replies are only meaningful when the scan completed.
-        let replied = completed && present && !rng.gen_bool(SLEEP_MISS_RATE);
+        let replied = completed && present && !rng.gen_bool(sleep_miss_rate);
         steps.push(Step {
             minute,
             completed,
@@ -208,9 +210,15 @@ fn round2(value: f64) -> f64 {
 }
 
 fn sweep() -> Vec<Cell> {
+    sweep_at(SLEEP_MISS_RATE)
+}
+
+fn sweep_at(sleep_miss_rate: f64) -> Vec<Cell> {
     // One trace set, reused for every cell, so cells differ only by thresholds.
     let mut rng = StdRng::seed_from_u64(SEED);
-    let traces: Vec<Vec<Step>> = (0..TRACES).map(|_| generate_trace(&mut rng)).collect();
+    let traces: Vec<Vec<Step>> = (0..TRACES)
+        .map(|_| generate_trace(&mut rng, sleep_miss_rate))
+        .collect();
     let origin = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
 
     let mut cells: Vec<Cell> = Vec::new();
@@ -312,10 +320,61 @@ fn mark_pareto(cells: &mut [Cell]) {
     }
 }
 
+/// Sleep rates the sensitivity check re-runs the shipped thresholds at. The
+/// modelled 0.25 sits in the middle; the ends cover a device that almost always
+/// answers and one that answers barely half the time.
+const SENSITIVITY_RATES: &[f64] = &[0.05, 0.15, 0.25, 0.35, 0.45];
+
+/// How the shipped thresholds hold up when the least certain model assumption
+/// changes. Every number above depends on devices missing a quarter of their
+/// replies while asleep, which is an assumption and not a measurement, so the
+/// report states what the same thresholds cost at other rates.
+#[derive(Serialize)]
+struct Sensitivity {
+    sleep_miss_rate: f64,
+    /// The shipped thresholds at this rate.
+    false_offline_per_1k_scans: f64,
+    mean_detection_delay_minutes: Option<f64>,
+    /// The loosest setting, which reports offline on one missed reply.
+    baseline_false_offline_per_1k_scans: f64,
+    /// How many times fewer false offline reports the shipped thresholds give
+    /// than that baseline. Above 1 means the rule is still earning its delay.
+    improvement_factor: Option<f64>,
+}
+
+fn sensitivity() -> Vec<Sensitivity> {
+    SENSITIVITY_RATES
+        .iter()
+        .map(|&rate| {
+            let cells = sweep_at(rate);
+            let find = |misses: u32, minutes: i64| {
+                cells
+                    .iter()
+                    .find(|c| {
+                        c.offline_after_missed_scans == misses && c.offline_after_minutes == minutes
+                    })
+                    .expect("swept cell")
+            };
+            let shipped = find(DEFAULT_MISSES, DEFAULT_MINUTES);
+            let baseline = find(1, 0);
+            Sensitivity {
+                sleep_miss_rate: rate,
+                false_offline_per_1k_scans: shipped.false_offline_per_1k_scans,
+                mean_detection_delay_minutes: shipped.mean_detection_delay_minutes,
+                baseline_false_offline_per_1k_scans: baseline.false_offline_per_1k_scans,
+                improvement_factor: (shipped.false_offline_per_1k_scans > 0.0).then(|| {
+                    round2(baseline.false_offline_per_1k_scans / shipped.false_offline_per_1k_scans)
+                }),
+            }
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 struct Report {
     model: Model,
     cells: Vec<Cell>,
+    sensitivity: Vec<Sensitivity>,
 }
 
 #[derive(Serialize)]
@@ -343,6 +402,7 @@ fn main() {
             return_rate: RETURN_RATE,
         },
         cells: sweep(),
+        sensitivity: sensitivity(),
     };
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 }
@@ -414,6 +474,52 @@ mod tests {
     fn the_shipped_default_is_recorded_once() {
         let cells = sweep();
         assert_eq!(cells.iter().filter(|c| c.shipped_default).count(), 1);
+    }
+
+    #[test]
+    fn the_thresholds_keep_earning_their_delay_at_every_modelled_sleep_rate() {
+        // The headline numbers assume devices miss a quarter of their replies.
+        // If the rule only paid off at that one rate, the result would be an
+        // artefact of the assumption rather than a property of the rule.
+        let rows = sensitivity();
+        assert_eq!(rows.len(), SENSITIVITY_RATES.len());
+        for row in &rows {
+            let factor = row
+                .improvement_factor
+                .expect("the shipped thresholds report some false offline at every rate");
+            assert!(
+                factor > 1.0,
+                "at sleep rate {} the shipped thresholds gave no improvement (factor {factor})",
+                row.sleep_miss_rate
+            );
+        }
+        // The benefit shrinks as devices sleep more: at a high enough miss rate
+        // even three consecutive misses become common, so waiting rescues a
+        // smaller share of them. The rule still helps several times over at the
+        // sleepiest rate modelled, which is the claim worth defending; a
+        // constant or growing factor would be the surprising result.
+        let factors: Vec<f64> = rows
+            .iter()
+            .map(|row| row.improvement_factor.unwrap())
+            .collect();
+        for pair in factors.windows(2) {
+            assert!(
+                pair[1] < pair[0],
+                "the benefit should shrink as devices sleep more, got {pair:?}"
+            );
+        }
+        assert!(*factors.last().unwrap() > 2.0);
+    }
+
+    #[test]
+    fn sleepier_devices_cost_more_false_offline_reports() {
+        // A direct statement of the exposure: the shipped thresholds are not
+        // rate-independent, and a deployment full of power-saving devices
+        // should expect more false offline reports than this sweep's headline.
+        let rows = sensitivity();
+        for pair in rows.windows(2) {
+            assert!(pair[1].false_offline_per_1k_scans > pair[0].false_offline_per_1k_scans);
+        }
     }
 
     #[test]

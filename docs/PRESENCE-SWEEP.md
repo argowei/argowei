@@ -26,6 +26,8 @@ In the model a device alternates between present and absent (2% chance of
 leaving, 8% of returning per scan), a present device still misses a reply 25% of
 the time while its radio sleeps, and 5% of scans fail and supply no evidence
 either way. Ground truth is the generator's own state, which no rule observes.
+The sleep rate is then varied separately in the [sensitivity
+check](#sensitivity-to-the-sleep-rate) below.
 
 Two costs are counted, and they oppose each other:
 
@@ -74,6 +76,37 @@ returned (`undetected_departures`), which rises with stricter thresholds: 1 at
 one miss, 49 at the shipped default, 217 at the strictest cell. Delay alone
 understates what strictness costs, because the departures that are never
 detected at all contribute no delay to the mean.
+
+## Sensitivity to the sleep rate
+
+Every number above assumes a present device misses 25% of its replies while its
+radio sleeps. That is an assumption, not a measurement, and it is the one the
+conclusions are most exposed to, so the report re-runs the shipped thresholds
+across a range of rates.
+
+| Sleep miss rate | False offline / 1k scans | Mean delay (min) | One-miss baseline | Improvement |
+|---|---|---|---|---|
+| 0.05 | 0.93 | 10.64 | 43.29 | 46.55x |
+| 0.15 | 5.05 | 9.92 | 125.58 | 24.87x |
+| 0.25 | 16.92 | 9.13 | 210.08 | 12.42x |
+| 0.35 | 44.17 | 8.00 | 295.34 | 6.69x |
+| 0.45 | 81.85 | 6.92 | 376.53 | 4.60x |
+
+Two things follow, and the second is the uncomfortable one.
+
+The rule is not an artefact of the chosen rate: it beats the one-miss baseline
+by at least 4.6 times everywhere in this range, so the decision to wait survives the
+assumption being wrong in either direction.
+
+But the benefit *shrinks* as devices sleep more, and the absolute cost grows
+sharply: 0.93 false offline reports per 1000 scans at a 5% miss rate against
+81.85 at 45%. Once missed replies are common enough, three consecutive misses
+stop being rare, and waiting rescues a smaller share of them. A network full of
+power-saving devices should therefore expect noticeably more false offline
+reports than the headline figure, and is the case where raising
+`offline_after_missed_scans` is worth considering. This is the opposite of a
+reassuring result, and it is why the rate is reported rather than buried in a
+constant.
 
 This is a characterisation of one decision rule under one model. It does not
 establish field accuracy or statistical superiority. Real scan frequency, host

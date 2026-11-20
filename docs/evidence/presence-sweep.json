@@ -682,5 +682,42 @@
       "pareto_optimal": false,
       "redundant_threshold": true
     }
+  ],
+  "sensitivity": [
+    {
+      "sleep_miss_rate": 0.05,
+      "false_offline_per_1k_scans": 0.93,
+      "mean_detection_delay_minutes": 10.64,
+      "baseline_false_offline_per_1k_scans": 43.29,
+      "improvement_factor": 46.55
+    },
+    {
+      "sleep_miss_rate": 0.15,
+      "false_offline_per_1k_scans": 5.05,
+      "mean_detection_delay_minutes": 9.92,
+      "baseline_false_offline_per_1k_scans": 125.58,
+      "improvement_factor": 24.87
+    },
+    {
+      "sleep_miss_rate": 0.25,
+      "false_offline_per_1k_scans": 16.92,
+      "mean_detection_delay_minutes": 9.13,
+      "baseline_false_offline_per_1k_scans": 210.08,
+      "improvement_factor": 12.42
+    },
+    {
+      "sleep_miss_rate": 0.35,
+      "false_offline_per_1k_scans": 44.17,
+      "mean_detection_delay_minutes": 8.0,
+      "baseline_false_offline_per_1k_scans": 295.34,
+      "improvement_factor": 6.69
+    },
+    {
+      "sleep_miss_rate": 0.45,
+      "false_offline_per_1k_scans": 81.85,
+      "mean_detection_delay_minutes": 6.92,
+      "baseline_false_offline_per_1k_scans": 376.53,
+      "improvement_factor": 4.6
+    }
   ]
 }
