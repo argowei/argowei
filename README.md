@@ -21,7 +21,9 @@ models, `argowei-collector` sends ARP requests, resolves names and runs nmap
 port scans, `argowei-api` persists scans and events and serves the authenticated
 HTTP API, and `argowei-cli` exposes interface discovery and manual scans.
 PostgreSQL stores the inventory, scan and event history; the Angular dashboard
-presents them.
+presents them. Measurement and persistence stay apart: the collector touches the
+network and the API touches the database, never both. The
+[architecture](docs/ARCHITECTURE.md) explains why.
 
 ## Preview
 
@@ -37,6 +39,7 @@ Discovery is disabled until you configure an interface. The [technical reference
 
 ## Documentation
 
+- [Architecture](docs/ARCHITECTURE.md) — the crates, how data flows, and why only one of them writes to the database
 - [Deployment](docs/DEPLOYMENT.md) — installation and network setup
 - [Threat model](docs/THREAT-MODEL.md) — trust boundaries, controls and deployment limits
 - [Technical reference](docs/TECHNICAL-REFERENCE.md) — discovery, port scans, authentication, data model, and development checks
