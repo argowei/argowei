@@ -18,6 +18,7 @@ import {
   filterDevices,
   sortDevices,
 } from './device-filter';
+import { DeviceSummary } from './device-summary';
 
 /**
  * All devices, filtered and sorted in the browser, refreshed every
@@ -25,7 +26,7 @@ import {
  */
 @Component({
   selector: 'app-device-list',
-  imports: [RouterLink, StatusIndicator, TimeAgoPipe],
+  imports: [RouterLink, StatusIndicator, TimeAgoPipe, DeviceSummary],
   template: `
     <section class="page">
       <header class="page-head">
@@ -34,6 +35,14 @@ import {
           <p class="muted" aria-live="polite">{{ shown().length }} of {{ devices().length }}</p>
         }
       </header>
+
+      @if (devices().length) {
+        <app-device-summary
+          [devices]="devices()"
+          [filter]="filter()"
+          (apply)="applyFilter($event)"
+        />
+      }
 
       <form class="filters" role="search" (submit)="$event.preventDefault()">
         <div class="field grow">
@@ -361,6 +370,17 @@ export class DeviceList {
 
   protected clearFilters(): void {
     this.filter.set(NO_FILTER);
+  }
+
+  /**
+   * Apply a summary tile's filter. Clicking the tile that is already active
+   * clears it, so a tile toggles the view it describes instead of trapping the
+   * list in a filter the tile gives no way back out of.
+   */
+  protected applyFilter(next: DeviceFilter): void {
+    this.filter.update((current) =>
+      current.status === next.status && current.trust === next.trust ? NO_FILTER : next,
+    );
   }
 
   protected sortBy(key: SortKey): void {

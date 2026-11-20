@@ -203,6 +203,35 @@ describe('DeviceList', () => {
     expect(header('Name').getAttribute('aria-sort')).toBe('descending');
   });
 
+  it('summarises the inventory and filters from a tile', async () => {
+    const r = await render();
+    const tile = (label: string) =>
+      Array.from(r.el.querySelectorAll<HTMLButtonElement>('app-device-summary button.tile')).find(
+        (button) => button.textContent?.includes(label),
+      )!;
+
+    // Two of the three fixtures are online, and the phone is offline.
+    expect(tile('Online').textContent).toContain('2');
+    expect(tile('Offline').textContent).toContain('1');
+
+    tile('Offline').click();
+    r.fixture.detectChanges();
+    expect(names(r.el)).toEqual(['Phone']);
+    expect(tile('Offline').getAttribute('aria-pressed')).toBe('true');
+
+    // Clicking the active tile again returns to the unfiltered list, so a tile
+    // is a toggle rather than a one-way trip.
+    tile('Offline').click();
+    r.fixture.detectChanges();
+    expect(names(r.el)).toHaveLength(3);
+    expect(tile('Offline').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('offers no summary before any device is known', async () => {
+    const r = await render([]);
+    expect(r.el.querySelector('app-device-summary')).toBeNull();
+  });
+
   it('keeps showing devices when a refresh fails', async () => {
     const r = await render();
 
