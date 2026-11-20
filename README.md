@@ -41,7 +41,7 @@ Discovery is disabled until you configure an interface. The [technical reference
 - [Threat model](docs/THREAT-MODEL.md) — trust boundaries, controls and deployment limits
 - [Technical reference](docs/TECHNICAL-REFERENCE.md) — discovery, port scans, authentication, data model, and development checks
 - [Events](docs/EVENTS.md) — the timeline event types and their payloads
-- [Presence evaluation](docs/PRESENCE-EVALUATION.md) — synthetic checks, a [trace replay benchmark](docs/PRESENCE-REPLAY.md), and a [lab export protocol](docs/PRESENCE-LAB.md) for independently labeled observations
+- [Presence evaluation](docs/PRESENCE-EVALUATION.md) — synthetic checks, a [threshold sweep](docs/PRESENCE-SWEEP.md) measuring what the shipped thresholds cost, a [trace replay benchmark](docs/PRESENCE-REPLAY.md), and a [lab export protocol](docs/PRESENCE-LAB.md) for independently labeled observations
 
 ## Contributing
 

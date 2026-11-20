@@ -87,6 +87,10 @@ independent ground-truth signal, record scanner failures separately from empty
 scans, and report false offline duration and departure-detection latency across
 device types and scan intervals. Keep synthetic and field results separate.
 
+The [threshold sweep](PRESENCE-SWEEP.md) asks the complementary question these
+five traces cannot: what every other threshold pair would have cost, and
+therefore whether the shipped pair is a defensible choice.
+
 The [trace replay benchmark](PRESENCE-REPLAY.md) accepts external observation
 and ground-truth timelines, measures duration-weighted errors, and records
 multiple departures with explicit undetected and censored outcomes.
