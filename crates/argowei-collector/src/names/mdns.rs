@@ -65,10 +65,12 @@ impl HostnameResolver for MdnsResolver {
 /// `annas-iphone.local` is called `annas-iphone`.
 fn clean(name: &str, target: &Target) -> Option<String> {
     let trimmed = name.trim_end_matches('.');
-    let host = trimmed
-        .strip_suffix(".local")
-        .or_else(|| trimmed.strip_suffix(".LOCAL"))
-        .unwrap_or(trimmed);
+    let host = if trimmed.len() >= 6 && trimmed[trimmed.len() - 6..].eq_ignore_ascii_case(".local")
+    {
+        &trimmed[..trimmed.len() - 6]
+    } else {
+        trimmed
+    };
     sanitize_name(host, Some(target.ip))
 }
 
@@ -87,6 +89,14 @@ mod tests {
         );
         assert_eq!(
             clean("annas-iphone.local.", &t).as_deref(),
+            Some("annas-iphone")
+        );
+        assert_eq!(
+            clean("annas-iphone.Local", &t).as_deref(),
+            Some("annas-iphone")
+        );
+        assert_eq!(
+            clean("annas-iphone.LOCAL", &t).as_deref(),
             Some("annas-iphone")
         );
         assert_eq!(

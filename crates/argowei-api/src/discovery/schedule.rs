@@ -163,16 +163,15 @@ pub fn spawn(
         tracing::info!("scheduled discovery disabled (ARGOWEI_DISCOVERY_INTERFACES is empty)");
     }
 
+    let (period, timeout, policy) = (config.interval, config.timeout, config.presence);
     config
         .interfaces
-        .iter()
-        .cloned()
+        .into_iter()
         .map(|interface| {
             status.register(&interface);
             let (db, scanner, locks) = (db.clone(), Arc::clone(&scanner), locks.clone());
             let status = status.clone();
             let names = names.clone();
-            let (period, timeout, policy) = (config.interval, config.timeout, config.presence);
 
             tokio::spawn(async move {
                 tracing::info!(%interface, ?period, "scheduled discovery started");
