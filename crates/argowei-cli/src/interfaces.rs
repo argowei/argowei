@@ -5,7 +5,14 @@ use argowei_core::network_interface::{NetworkInterface, NetworkInterfaceKind};
 use std::{fs, io, path::Path};
 
 pub fn run() -> io::Result<()> {
-    let interfaces = read_linux_network_interfaces(Path::new("/sys/class/net"))?;
+    let sys_class_net = Path::new("/sys/class/net");
+    if !sys_class_net.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "interface discovery via /sys/class/net is only available on Linux (see docs/DEPLOYMENT.md)",
+        ));
+    }
+    let interfaces = read_linux_network_interfaces(sys_class_net)?;
     print_interfaces(&interfaces);
 
     Ok(())
@@ -112,6 +119,12 @@ mod tests {
         assert_eq!(interfaces[0].kind, NetworkInterfaceKind::Loopback);
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reports_error_for_missing_sysfs_directory() {
+        let missing = Path::new("/does/not/exist/sys/class/net");
+        assert!(read_linux_network_interfaces(missing).is_err());
     }
 
     fn temp_sysfs_root(label: &str) -> std::path::PathBuf {

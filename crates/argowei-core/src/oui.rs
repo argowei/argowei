@@ -101,7 +101,7 @@ pub fn lookup(mac: &str) -> MacInfo<'static> {
 fn parse_mac(mac: &str) -> Option<[u8; 6]> {
     let hex: Vec<u8> = mac
         .bytes()
-        .filter(|b| !matches!(b, b':' | b'-' | b'.'))
+        .filter(|b| !matches!(b, b':' | b'-' | b'.') && !b.is_ascii_whitespace())
         .collect();
     if hex.len() != 12 || !hex.iter().all(u8::is_ascii_hexdigit) {
         return None;
@@ -147,6 +147,7 @@ ABCDEF\t
             "b8-27-eb-12-34-56",
             "b827.eb12.3456",
             "b827eb123456",
+            "  b8:27:eb:12:34:56  \n",
         ] {
             assert_eq!(table.lookup(mac).vendor, Some("Test Pi Maker"), "{mac}");
         }
